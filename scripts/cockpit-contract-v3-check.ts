@@ -1394,6 +1394,18 @@ async function faithful() {
       ["paid", "Raise the priority of Paid for the first week of December", wantRank("paid", 3)],
       ["outbound", `The Outbound budget can go up to EUR 1 ${n}0,00 per month`, wantBudget("outbound", 1000 + n * 10)],
     ];
+    const extra = ["provided Lea agrees", "via referrals", "across channels", "as Tom wants", "thousand leads", "plus demos", "percentage points", "times", "tops", "despite holidays", "among retailers"];
+    for (const words of extra) asks.push(["outbound", `Raise the Outbound target to ${n} ${words}`, wantTarget("outbound", n)], ["paid", `Raise the Paid target by ${n} ${words}`, () => false]);
+    for (const verb of ["Cut", "Raise", "Update", "Drop", "Extend", "Change"]) {
+      asks.push(["paid", `${verb} the Paid budget of €${n} a week`, () => false], ["seo", `${verb} the SEO target of ${n} pages`, () => false], ["content", `${verb} the goal of ${n} sign-ups for Content`, () => false],
+        ["outbound", `${verb} the sends a day guardrail of ${n}`, () => false], ["outbound", `${verb} the Outbound deadline of 18 December`, () => false],
+        ["content", `${verb} the Content deadline on 2${rand(0, 9)} November`, () => false], ["partnerships", `${verb} the Partnerships deadline by 2${rand(0, 9)} November`, () => false]);
+    }
+    for (const verb of ["Drop", "Cut", "Reduce", "Lower"]) asks.push(["paid", `${verb} Paid as our top priority`, () => false], ["partnerships", `${verb} Partnerships as our top priority`, () => false],
+      ["seo", `${verb} the priority of SEO over Paid`, () => false], ["outbound", `${verb} Outbound priority above Content`, () => false]);
+    asks.push(["outbound", `Raise the Outbound target to ${n} on 5 December`, wantTarget("outbound", n)], ["paid", `Set the Paid target to 5${n} until 20 December`, wantTarget("paid", 500 + n)],
+      ["seo", `Raise the SEO budget by €${n} a month`, () => false], ["seo", "Cut the SEO budget by €2 a day", () => false], ["outbound", "Raise the bounces guardrail by 10%", wantLimit("outbound-bounces", 4.4)],
+      ["outbound", "Set the bounces guardrail to 1.125%", wantLimit("outbound-bounces", 1.125)], ["outbound", "Set the bounces guardrail to 0.500%", wantLimit("outbound-bounces", 0.5)], ["paid", "Set the Paid budget to €0.999", () => false]);
     const whole: [string, string, Want][] = [
       ["seo", `Set the SEO budget to €${n} a week`, wantBudget("seo", n)], ["outbound", `Set the Outbound target to ${n}`, wantTarget("outbound", n)],
       ["outbound", `Set the sends a day guardrail to ${n}`, wantLimit("outbound-sends-a-day", n)], ["paid", "Raise the priority of Paid to number 2", wantRank("paid", 2)],
@@ -1442,6 +1454,31 @@ async function faithful() {
     ok(tried > 0 && opened.length === 0 && (await owned()) === before, `E7 ${tried} asks on topics out of reach open no goal change (${opened.slice(0, 4).join("; ")}; ${before} → ${await owned()})`);
   });
 
+  // E7: what a delegated decider sees and may approve ends where their access ends
+  await scenario("E7 a delegated decider stays inside their access", "gtm", async url => {
+    await act(url, { type: "access.set", topicId: "partnerships", personId: "lea-brandt", access: { kind: "all", stages: [] } });
+    await act(url, { type: "decisionRight.set", rule: "hardToUndo", who: "agent", personId: "lea-brandt", dailyLimit: 20 });
+    const ids = await topicIds(url);
+    const closed = new Set<string>();
+    for (const t of ids) if ((await getAs(url, `/topics/${t}`, "lea-brandt")).status !== 200) closed.add(t);
+    const ranks = async () => Promise.all(ids.map(async t => (await get(url, `/topics/${t}`)).body?.meta?.priority ?? null));
+    const before = await ranks();
+    const { id } = await propose(url, "partnerships", "Lower the priority of Partnerships", "lea-brandt");
+    if (id) await act(url, { type: "decision.approve", decisionId: id }, "lea-brandt");
+    ok(closed.size > 0 && same(await ranks(), before), `E7 Lea moves no rank of a topic out of reach (${short(before)} → ${short(await ranks())})`);
+    const moved = await propose(url, "partnerships", "Move the Partnerships deadline to 21 February");
+    await act(url, { type: "decision.approve", decisionId: moved.id });
+    const bad: string[] = [];
+    for (const path of ["/decisions", `/decisions/${moved.id}`, "/topics/partnerships", "/brief"]) {
+      const body = (await getAs(url, path, "lea-brandt")).body;
+      walk(body, path, (k, v) => { if (k === "affectedTopics" && Array.isArray(v)) for (const t of v) if (closed.has(t)) bad.push(`${path} ${t}`); });
+      if (path !== "/topics/partnerships" && JSON.stringify(body).includes("Paid's partner budget")) bad.push(`${path} names Paid's budget`);
+    }
+    ok(moved.gc?.affectedTopics?.length > 0 && bad.length === 0, `E7 the topics a change reaches are cut to the reader's (${bad.join(", ")})`);
+    const other = await propose(url, "partnerships", "Set the Partnerships bounces guardrail to 3%");
+    ok(!JSON.stringify((await get(url, `/decisions/${other.id}`)).body).includes("Paid's partner budget"), "G3 only a new date or target is said to move Paid's partner budget");
+  });
+
   // G4: the last approval counts, whatever was written first, and undoing it gives back the one before
   await scenario("G4 approvals apply in the order they are given", "gtm", async url => {
     const [a, b] = [rand(31, 59), rand(60, 89)];
@@ -1487,6 +1524,10 @@ async function faithful() {
     await act(url, { type: "decision.approve", decisionId: zero.id });
     const goal = (await get(url, "/topics/outbound")).body?.goal;
     ok((goal?.guardrails?.items ?? []).find((x: any) => x.id === "outbound-sends-a-day")?.state === "breached" && by(goal?.blockers, "guardrailId", "outbound-sends-a-day"), "L6 a reading above a limit of 0 is breached and blocks");
+    const bounce = await propose(url, "outbound", "Set the bounces guardrail to 2%");
+    await act(url, { type: "decision.approve", decisionId: bounce.id });
+    const detail = by((await get(url, "/skills")).body?.guardrails, "id", "outbound")?.detail ?? "";
+    ok(/\b2% bounces/.test(detail) && !/4%/.test(detail), `L6 the switch states the new bounce limit (${detail})`);
     const euros = rand(45, 90);
     const agents = await propose(url, "content", `Set the agents this week guardrail to €${euros}`);
     await act(url, { type: "decision.approve", decisionId: agents.id });
