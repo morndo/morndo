@@ -101,3 +101,36 @@ describe("every done step has a time", () => {
     expect(step).toMatchObject({ kind: "ok", doneAt: "2026-11-16T09:20:00+01:00" });
   });
 });
+
+describe("a goal word in a module without goals", () => {
+  const send = (world: World, threadId: string, text: string) => asAny(world.act({ type: "message.send", threadId, text } as never));
+
+  it("dev: it is an ordinary request and files a lane", () => {
+    for (const text of ["Add a deadline field to the shipment form", "Make the tax rates fix the top priority", "Raise the budget for the build cache", "Add a guardrail for the retry loop"]) {
+      const world = new World("dev");
+      const result = send(world, "topic:web", text);
+      expect(result.message.label?.kind, text).toBe("request");
+      expect(result.laneId, text).toBeTruthy();
+    }
+  });
+
+  it("gtm: the rule stays and a goal sentence is a goal change", () => {
+    const world = new World("gtm");
+    const result = send(world, "topic:seo", "Change the SEO deadline to 31 January");
+    expect(result.message.label?.kind).toBe("goalChange");
+    expect(result.laneId).toBeNull();
+  });
+});
+
+describe("priority ranks", () => {
+  it("count only topics that hold a goal, and stay 1..n among them", () => {
+    const world = asAny(new World("gtm"));
+    world.topics.get("research").meta = { askedBy: "x", ownerLine: "x", parts: [], nextReportAt: null, nextReportId: null, priority: null };
+    const ranks = [...world.priorityRanks().entries()] as [string, number][];
+    expect(ranks.map(([id]) => id).sort()).toEqual(["content", "outbound", "paid", "partnerships", "seo"]);
+    expect(ranks.map(([, rank]) => rank).sort()).toEqual([1, 2, 3, 4, 5]);
+    const dev = asAny(new World("dev"));
+    for (const topic of dev.topics.values()) topic.meta = { askedBy: "x", ownerLine: "x", parts: [], nextReportAt: null, nextReportId: null, priority: null };
+    expect(dev.priorityRanks().size).toBe(0);
+  });
+});

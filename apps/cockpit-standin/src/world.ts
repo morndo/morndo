@@ -83,9 +83,10 @@ function slug(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 175);
 }
 
-function classify(text: string): LabelKind {
+/** `goals` is whether this module's topics have goals at all: where they do not, a goal word is just a word in a request. */
+function classify(text: string, goals: boolean): LabelKind {
   if (/\?\s*$/.test(text)) return "question";
-  if (/\b(?:deadline|goal|target|budget|priorit|guardrail)/i.test(text)) return "goalChange";
+  if (goals && /\b(?:deadline|goal|target|budget|priorit|guardrail)/i.test(text)) return "goalChange";
   if (/\b(?:done|checked|finished|is ready|are ready)\b/i.test(text)) return "done";
   if (/\b(?:approve|decide|go with)\b/i.test(text)) return "decision";
   return "request";
@@ -1699,8 +1700,12 @@ export class World {
     if (next?.scoreAt) goal.nextScoreAt = next.scoreAt;
   }
 
+  private hasGoals(): boolean {
+    return [...this.topics.values()].some(topic => topic.goal);
+  }
+
   private priorityRanks(): Map<string, number> {
-    const ids = this.sidebarBase.groups.map(group => group.id).filter(id => this.topics.get(id)?.meta);
+    const ids = this.sidebarBase.groups.map(group => group.id).filter(id => this.topics.get(id)?.goal);
     const ranks = new Map<string, number>();
     ids.forEach((id, index) => ranks.set(id, this.topics.get(id)?.meta?.priority ?? index + 1));
     for (const change of this.approvedChanges()) {
@@ -2666,7 +2671,7 @@ export class World {
       if (!stage) throw new Problem("badRequest", "Choose a stage for this message.");
       if (!stages.includes(stage)) throw new Problem("forbidden", "This reader cannot post in that stage.");
       const thread = requireRecord(this.threads.get(threadId), "thread");
-      const message = this.message(viewer, text, classify(text), { kind: "stage", stage });
+      const message = this.message(viewer, text, classify(text, this.hasGoals()), { kind: "stage", stage });
       const holder = topic.stages.find(item => item.name === stage)?.runBy?.id ?? null;
       message.addressee = holder === viewer.id ? null : holder;
       message.attachment = command.attachment ?? null;
@@ -2679,7 +2684,7 @@ export class World {
     const topic = topicId ? this.topicView(topicId, viewer, new URLSearchParams()) : null;
     const suggested = matchesSuggestion(text, thread.suggestions);
     const kind = scope.kind === "topic" || scope.kind === "manager" || scope.kind === "general"
-      ? suggested || (command.page && /^(sum up|summari[sz]e)\b/i.test(text)) ? "question" : classify(text) : null;
+      ? suggested || (command.page && /^(sum up|summari[sz]e)\b/i.test(text)) ? "question" : classify(text, this.hasGoals()) : null;
     const model = this.model(command.model);
     const sent = this.message(viewer, text, kind);
     sent.attachment = command.attachment ?? null;
