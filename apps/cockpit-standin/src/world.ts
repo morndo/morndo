@@ -118,6 +118,16 @@ function isOwnClause(part: string, leading: boolean): boolean {
   return DETERMINER.has(rest[0] ?? "") || /^\d+$/.test(rest[0] ?? "");
 }
 
+/** "the X" in the second clause, with X already in the first: the same thing again, so the same ask. */
+function namesAgain(left: string, right: string): boolean {
+  const words = (value: string) => value.toLowerCase().replace(/[^a-z0-9\s-]/g, " ").split(/\s+/).filter(Boolean).map(word => word.replace(/s$/, ""));
+  const object = words(right).slice(1);
+  if (object[0] !== "the" || object.length < 2) return false;
+  const named = object.slice(1);
+  const first = words(left);
+  return first.some((_, start) => named.every((word, offset) => first[start + offset] === word));
+}
+
 // One sentence, one "and" between two clauses, each a verb with an object of its own. A comma, a second sentence, a pronoun
 // or a word that chains the second part to the first keep it one lane.
 function splitDeliverables(text: string): [string, string] | null {
@@ -128,6 +138,7 @@ function splitDeliverables(text: string): [string, string] | null {
   const left = parts[0]?.trim() ?? "";
   const right = parts[1]?.trim() ?? "";
   if (!isOwnClause(left, true) || !isOwnClause(right, false)) return null;
+  if (namesAgain(left, right)) return null;
   return [left, right.charAt(0).toUpperCase() + right.slice(1)];
 }
 
@@ -1206,6 +1217,7 @@ export class World {
           guardrail.what = readerCopy(guardrail.what, owner);
           if (guardrail.limit.kind === "policy") guardrail.limit.text = readerCopy(guardrail.limit.text, owner);
         }
+        for (const blocker of view.goal.blockers) blocker.who = readerCopy(blocker.who, owner);
         const decision = this.decisions.get(view.goal.decision?.decisionId ?? "");
         if (view.goal.decision && decision && !this.hasDecisionRight(decision, viewer)) {
           view.goal.decision.approveLabel = null;
@@ -1580,7 +1592,7 @@ export class World {
       const thread = this.threads.get(`topic:${topic.id}`);
       if (!thread) continue;
       const fresh = thread.messages.filter(message => !this.fixtureMessageIds.has(message.id));
-      const questions = fresh.filter(message => message.label?.kind === "question" || isQuestion(message.text)).length;
+      const questions = fresh.filter(message => message.label?.kind === "question").length;
       const instructions = fresh.filter(message => message.label?.kind === "request" || message.label?.kind === "goalChange").length;
       if (!questions && !instructions) continue;
       const index = lines.findIndex(line => line.toLowerCase().startsWith(`${topic.name.toLowerCase()}:`) && /instruction|question/i.test(line));
@@ -1705,7 +1717,11 @@ export class World {
       const from = eurosLabel(original.limit.money.amountMinor);
       const to = eurosLabel(item.limit.money.amountMinor);
       if (from === to) continue;
+      const named = goal.gap.says.includes(from);
       goal.gap.says = goal.gap.says.replaceAll(from, to);
+      if (named && item.state !== "breached" && item.value.kind === "money") {
+        goal.gap.says = `${item.what} is ${eurosLabel(item.value.money.amountMinor)}, inside the ${to} guardrail.`;
+      }
       goal.gap.steps = goal.gap.steps.map(step => step.replaceAll(from, to));
     }
   }
@@ -2357,7 +2373,8 @@ export class World {
     for (const part of parts) this.filingPlace(part, viewer, options);
     const groupId = `group-${++this.serial}`;
     const filed = parts.map(part => this.file(part, viewer, options));
-    for (const item of filed) item.receipt.text = text;
+    const named = options.attachment ? `${text} (with ${options.attachment.name})` : text;
+    for (const item of filed) item.receipt.text = named;
     const ids = filed.map(item => item.lane.id);
     for (const item of filed) {
       item.lane.groupId = groupId;

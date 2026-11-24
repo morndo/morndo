@@ -283,3 +283,79 @@ describe("a job that is scheduled says so", () => {
     });
   }
 });
+
+describe("splits and receipts", () => {
+  const filed = (module: Module, text: string, attachment?: unknown) => {
+    const world = new World(module);
+    const result = asAny(world.act({ type: "lane.file", text, ...(attachment ? { attachment } : {}) } as never));
+    return { result, count: (result.events as any[]).filter(event => event.type === "lane.filed").length };
+  };
+
+  it("an object that the first clause already named is one ask", () => {
+    expect(filed("gtm", "Write a blog post and publish the post").count).toBe(1);
+    expect(filed("gtm", "Create a landing page and test the landing page").count).toBe(1);
+    expect(filed("gtm", "Write a blog post and publish the page").count).toBe(2);
+    expect(filed("gtm", "Interview the three churned customers and proofread the pricing page").count).toBe(2);
+    expect(filed("gtm", "Collect a list of event sponsors and translate our onboarding email").count).toBe(2);
+  });
+
+  it("the receipt of a split ask names its attachment like a plain one", () => {
+    const attachment = { id: "up-1", name: "brief.pdf", kind: "pdf", sizeBytes: 1200, url: "https://files.example.test/brief.pdf" };
+    const world = new World("gtm");
+    const upload = (name: string) => ({ ...attachment, name });
+    const split = asAny(world.act({ type: "lane.file", text: "Interview the three churned customers and proofread the pricing page", attachment: upload("a.pdf") } as never));
+    const plain = asAny(new World("gtm").act({ type: "lane.file", text: "Interview the three churned customers", attachment: upload("a.pdf") } as never));
+    expect(plain.receipt.text).toContain("(with a.pdf)");
+    expect(split.events.filter((event: any) => event.type === "lane.filed").length).toBe(2);
+    expect(split.receipt.text).toBe("Interview the three churned customers and proofread the pricing page (with a.pdf)");
+  });
+});
+
+describe("what the Manager's lines say", () => {
+  it("counts a message once, by its stored label", () => {
+    const world = new World("gtm");
+    const { read, act } = actor(world);
+    act({ type: "message.send", threadId: "topic:paid", text: "Can you draft two ad variants for finance" });
+    const line = (read("ManagerView").since as string[]).find(item => item.startsWith("Paid:") && /instruction|question/.test(item));
+    expect(line).toContain("1 instruction");
+    expect(line).not.toMatch(/question/);
+    const world2 = new World("gtm");
+    const second = actor(world2);
+    second.act({ type: "message.send", threadId: "topic:paid", text: "Where does the paid budget stand this week?" });
+    const asked = (second.read("ManagerView").since as string[]).find(item => item.startsWith("Paid:") && /question/.test(item));
+    expect(asked).toMatch(/1 question/);
+    expect(asked).not.toMatch(/instruction/);
+  });
+});
+
+describe("a guardrail change", () => {
+  const change = (world: World, topic: string, text: string) => {
+    const { read, act } = actor(world);
+    const id = asAny(act({ type: "message.send", threadId: `topic:${topic}`, text })).message.decisionId as string;
+    expect(id, text).toBeTruthy();
+    act({ type: "decision.approve", decisionId: id });
+    return read("TopicView", topic).goal;
+  };
+
+  it("names the owner to every reader but the owner on a blocker that is theirs", () => {
+    const world = new World("gtm");
+    const { read, act } = actor(world);
+    act({ type: "access.set", topicId: "outbound", personId: "jonas-falk", access: { kind: "all", stages: [] } });
+    const goal = change(world, "outbound", "Set the bounces guardrail to 1%");
+    const generated = (goal.blockers as any[]).filter(item => item.guardrailId);
+    expect(generated.length).toBeGreaterThan(0);
+    for (const blocker of generated) expect(blocker.who).toBe("You");
+    const seen = read("TopicView", "outbound", "jonas-falk").goal.blockers as any[];
+    for (const blocker of seen) expect(blocker.who, blocker.short).not.toMatch(/\byou\b/i);
+    expect(seen.filter(item => item.guardrailId).map(item => item.who)).toEqual(generated.map(() => world.owner.shortName));
+  });
+
+  it("says the reading is inside a raised limit, and keeps its words while it is still breached", () => {
+    const raised = change(new World("gtm"), "paid", "Change the guardrail on cost per lead to 150 euros");
+    expect(raised.guardrails.items.find((item: any) => item.id === "cost-per-lead").state).not.toBe("breached");
+    expect(raised.gap.says).toBe("Cost per lead is €114, inside the €150 guardrail.");
+    const still = change(new World("gtm"), "paid", "Change the guardrail on cost per lead to 110 euros");
+    expect(still.guardrails.items.find((item: any) => item.id === "cost-per-lead").state).toBe("breached");
+    expect(still.gap.says).toBe("To bring a lead under €110 by December:");
+  });
+});
