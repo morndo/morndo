@@ -316,6 +316,8 @@ ok(/refus/i.test(`${defs.Connection?.properties?.scope?.description ?? ""} ${def
 {
   const run = branch("Command", "skill.run");
   ok(run?.properties?.text && !(run.required ?? []).includes("text"), "E3 skill.run.text is optional");
+  // 1.0.0 published text as a plain string, so a client without one leaves the key out (the Rust type does; null is refused)
+  ok(run?.properties?.text?.type === "string" && !nullable(run.properties.text), "E3 skill.run.text stays a string, as 1.0.0 published it");
 }
 field("E4", "BriefView", "edition", "present", "#MeterCount");
 field("E5", "LaneView", "leadName", "present", "string");
@@ -929,6 +931,8 @@ async function run() {
     const skill = by((await get(url, "/skills")).body?.skills, "enabled", true);
     const r = await act(url, { type: "skill.run", skill: skill?.id });
     ok(r.status === 200, `E3 skill.run without text runs the skill's default ask (got ${r.status})`);
+    const none = await act(url, { type: "skill.run", skill: skill?.id, text: null });
+    ok(none.status === 400, `E3 a null text is refused, as the schema says (got ${none.status})`);
   });
 
   await scenario("E6 addressee", "gtm", async url => {
@@ -1208,11 +1212,11 @@ async function invariants() {
   // G1, G4: numbers drawn per run, approved, and read back
   const budget = rand(1100, 9900);
   await scenario("G4 budget in other words", "gtm", async url => {
-    const text = pick([`Cut the SEO budget to EUR ${budget} per month`, `Bring the budget of SEO to €${budget} a month`]);
+    const text = pick([`Cut the SEO budget to EUR ${budget} per week`, `Bring the budget of SEO to €${budget} a week`]);
     const r = await act(url, { type: "message.send", threadId: "topic:seo", text });
     const id = decisionOf(r);
     const gc = id ? (await get(url, `/decisions/${id}`)).body?.goalChange : undefined;
-    ok(gc?.field === "budget" && gc?.budget?.to?.amountMinor === budget * 100 && gc?.budget?.period === "month", `G1 "${text}" asks for ${budget} EUR a month (${short(gc?.budget)})`);
+    ok(gc?.field === "budget" && gc?.budget?.to?.amountMinor === budget * 100 && gc?.budget?.period === "week", `G1 "${text}" asks for ${budget} EUR a week (${short(gc?.budget)})`);
     await framesMatchViews(url, "approving a budget", () => act(url, { type: "decision.approve", decisionId: id }));
     ok((await get(url, "/topics/seo")).body?.spend?.cap?.amountMinor === budget * 100, "G4 the approved SEO budget is the cap");
     const asks: any[] = (await get(url, "/manager")).body?.asks ?? [];
@@ -1349,8 +1353,8 @@ async function faithful() {
     const plain: [string, string, Want][] = [
       ["seo", `Set the SEO budget to €${n} a week`, wantBudget("seo", n, "week")],
       ["paid", `Raise the Paid budget cap to ${n}00 euros`, wantBudget("paid", n * 100)],
-      ["content", `Give Content a budget of €${n} per month`, wantBudget("content", n, "month")],
-      ["outbound", `Cut the Outbound budget to EUR ${n} a month`, wantBudget("outbound", n, "month")],
+      ["content", `Give Content a budget of €${n} per week`, wantBudget("content", n, "week")],
+      ["outbound", `Cut the Outbound budget to EUR ${n} a week`, wantBudget("outbound", n, "week")],
       ["outbound", `Set the Outbound target to ${n}`, wantTarget("outbound", n)],
       ["paid", `Raise the Paid target to 1,${n}0 leads`, wantTarget("paid", 1000 + n * 10)],
       ["outbound", `The Outbound goal is now ${n} meetings`, wantTarget("outbound", n)],
@@ -1404,7 +1408,7 @@ async function faithful() {
     for (const verb of ["Drop", "Cut", "Reduce", "Lower"]) asks.push(["paid", `${verb} Paid as our top priority`, () => false], ["partnerships", `${verb} Partnerships as our top priority`, () => false],
       ["seo", `${verb} the priority of SEO over Paid`, () => false], ["outbound", `${verb} Outbound priority above Content`, () => false]);
     asks.push(["outbound", `Raise the Outbound target to ${n} on 5 December`, wantTarget("outbound", n)], ["paid", `Set the Paid target to 5${n} until 20 December`, wantTarget("paid", 500 + n)],
-      ["seo", `Raise the SEO budget by €${n} a month`, () => false], ["seo", "Cut the SEO budget by €2 a day", () => false], ["outbound", "Raise the bounces guardrail by 10%", wantLimit("outbound-bounces", 4.4)],
+      ["seo", `Raise the SEO budget by €${n} a month`, () => false], ["seo", `Set the SEO budget to €${n} a month`, () => false], ["paid", `Raise the Paid budget to €${n} a day`, () => false], ["seo", "Cut the SEO budget by €2 a day", () => false], ["outbound", "Raise the bounces guardrail by 10%", wantLimit("outbound-bounces", 4.4)],
       ["outbound", "Set the bounces guardrail to 1.125%", wantLimit("outbound-bounces", 1.125)], ["outbound", "Set the bounces guardrail to 0.500%", wantLimit("outbound-bounces", 0.5)], ["paid", "Set the Paid budget to €0.999", () => false]);
     const whole: [string, string, Want][] = [
       ["seo", `Set the SEO budget to €${n} a week`, wantBudget("seo", n)], ["outbound", `Set the Outbound target to ${n}`, wantTarget("outbound", n)],
