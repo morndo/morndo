@@ -815,7 +815,7 @@
             "at": "2026-11-13T17:14:00+01:00",
             "id": "outbound-history-7",
             "undone": false,
-            "checkId": null
+            "checkId": "friday-reply"
           },
           {
             "kind": "event",
