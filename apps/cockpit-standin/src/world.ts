@@ -916,7 +916,8 @@ export class World {
 
   /** The weekly rule whose next occurrence is this date. */
   private weeklyRule(dueAt: string): string {
-    const weeks = Math.max(1, Math.ceil((Date.parse(dueAt) - Date.parse(this.now)) / (7 * 86400000)));
+    const days = (Date.parse(calendarDay(dueAt)) - Date.parse(calendarDay(this.now))) / 86400000;
+    const weeks = Math.max(1, Math.floor(days / 7));
     const day = new Intl.DateTimeFormat("en-GB", { weekday: "short", timeZone: "Europe/Berlin" }).format(new Date(dueAt)).slice(0, 2).toUpperCase();
     return `FREQ=WEEKLY;${weeks > 1 ? `INTERVAL=${weeks};` : ""}BYDAY=${day}`;
   }
