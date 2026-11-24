@@ -815,7 +815,7 @@
             "at": "2026-11-13T17:14:00+01:00",
             "id": "outbound-history-7",
             "undone": false,
-            "checkId": "friday-reply"
+            "checkId": null
           },
           {
             "kind": "event",
@@ -878,6 +878,35 @@
             "id": "outbound-history-9",
             "undone": false,
             "checkId": null
+          },
+          {
+            "kind": "event",
+            "actor": {
+              "id": "manager",
+              "name": "Manager",
+              "shortName": "Manager",
+              "kind": "agent",
+              "avatar": "M",
+              "role": null,
+              "state": null,
+              "word": null,
+              "text": null,
+              "skill": null,
+              "engine": null,
+              "record": null
+            },
+            "text": "checked reply handling: no yes waited more than a day",
+            "laneId": "reply-handling",
+            "decision": false,
+            "sentOutside": false,
+            "undoable": false,
+            "count": null,
+            "samples": [],
+            "decisionId": null,
+            "at": "2026-11-13T09:00:00+01:00",
+            "id": "outbound-history-12",
+            "undone": false,
+            "checkId": "friday-reply"
           }
         ]
       },
