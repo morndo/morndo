@@ -1591,10 +1591,156 @@ async function faithful() {
   });
 }
 
+// ---- what the fresh review found: each rule holds on any path, not only on the one the scenarios above walk
+async function reviewed() {
+  await scenario("E1 a revoked invitation leaves nothing behind", "gtm", async url => {
+    const invite = async () => {
+      await act(url, { type: "access.invite", topicId: "paid", nameOrEmail: "nora@example.test" });
+      return ((await get(url, "/members")).body?.invitations ?? []).find((i: any) => i.nameOrEmail === "nora@example.test" && i.acceptedAt === null);
+    };
+    const first = await invite();
+    const pending = by((await get(url, "/members")).body?.items?.map((m: any) => ({ ...m, pid: m.person.id })), "pid", first?.personId);
+    ok(first && pending?.invitedAt === first.invitedAt && pending?.joinedAt === null, `E1 a pending member row says when they were invited and nothing about joining (${short([pending?.invitedAt, pending?.joinedAt])})`);
+    const r = await act(url, { type: "access.revoke", invitationId: first?.id });
+    ok(r.status === 200 && hasEvent(r, "members.changed", { personId: first?.personId }), "E1 revoking emits members.changed");
+    for (const path of ["/workspace", "/brief", "/sidebar"]) ok((await getAs(url, path, first?.personId)).status === 403, `E1 ${path} is closed to a revoked invitee`);
+    ok(!JSON.stringify((await get(url, "/members")).body).includes(first?.personId), "E1 /members no longer lists a revoked invitee");
+    const second = await invite();
+    ok(second && second.id !== first?.id, "E1 a revoked person can be invited again");
+    const invitee = openFeed(url, second?.personId);
+    await invitee.opened;
+    const accepted = await act(url, { type: "access.accept", invitationId: second?.id }, second?.personId);
+    await pause(300);
+    invitee.ws.close();
+    const told = [...new Set([...events(accepted), ...invitee.frames].filter(e => e.type === "access.changed").map(e => e.topicId))];
+    ok(accepted.status === 200 && same(told, ["paid"]), `E1 accepting names only the topic that was shared (${short(told)})`);
+    const row = ((await get(url, "/members")).body?.items ?? []).find((m: any) => m.person.id === second?.personId);
+    const invitation = ((await get(url, "/members")).body?.invitations ?? []).find((i: any) => i.id === second?.id);
+    ok(row?.invitedAt === invitation?.invitedAt && row?.joinedAt === invitation?.acceptedAt && isTime(row?.joinedAt), `E1 the member row has the invitation's dates (${short([row?.invitedAt, row?.joinedAt])})`);
+  });
+
+  await scenario("G4 a change moves only its own field", "gtm", async url => {
+    const n = rand(31, 89);
+    const read = async () => (await get(url, "/topics/partnerships")).body?.goal;
+    const start = await read();
+    const date = await propose(url, "partnerships", "Move the Partnerships deadline to 21 February");
+    const target = await propose(url, "partnerships", `Set the Partnerships target to ${n}`);
+    const unit = await propose(url, "partnerships", "Change the Partnerships goal unit to contracts");
+    for (const p of [target, date, unit]) if (p.id) await act(url, { type: "decision.approve", decisionId: p.id });
+    const after = await read();
+    ok(after?.target === n && local(after?.deadlineAt, "Europe/Berlin", "date") === "2027-02-21" && (!unit.id || after?.unit === "contracts"), `G4 target, deadline and unit each keep what was approved for them (${short([after?.target, after?.deadlineAt, after?.unit])})`);
+    for (const p of [target]) await act(url, { type: "decision.undo", decisionId: p.id });
+    const undone = await read();
+    ok(undone?.target === start?.target && undone?.deadlineAt === after?.deadlineAt, `G4 undoing the target leaves the deadline (${short([undone?.target, undone?.deadlineAt])})`);
+  });
+
+  for (const module of ["gtm", "dev"] as Module[]) await scenario("R5 only what is done reads done", module, async url => {
+    const bad: string[] = [];
+    for (const d of (await get(url, "/decisions")).body?.items ?? []) {
+      const before = (await get(url, `/decisions/${d.id}`)).body?.nextSteps ?? [];
+      if ((await act(url, { type: "decision.approve", decisionId: d.id })).status !== 200) continue;
+      const after = (await get(url, `/decisions/${d.id}`)).body?.nextSteps ?? [];
+      after.forEach((s: any, i: number) => { if (s.state === "ok" && before[i]?.state !== "ok" && !/your ok|you approve/i.test(s.step)) bad.push(`${d.id}: ${s.step}`); });
+      const lane = d.target && (await get(url, `/decisions/${d.id}`)).body?.laneId;
+      const steps = async () => lane ? (await get(url, `/lanes/${lane}`)).body?.steps?.map((s: any) => s.doneAt) : [];
+      const first = await steps();
+      await pause(1100);
+      if (!same(first, await steps())) bad.push(`${d.id}: doneAt moves between reads`);
+    }
+    ok(bad.length === 0, `R5 ${module}: an approval marks only its own OK as done, at the time of the approval (${bad.slice(0, 4).join("; ")})`);
+  });
+
+  await scenario("S2 approve, undo, decline, undo", "gtm", async url => {
+    const state = async () => (await get(url, "/decisions/d4")).body?.state;
+    const seen: unknown[] = [];
+    for (const type of ["decision.approve", "decision.undo", "decision.decline", "decision.undo", "decision.approve", "decision.undo"]) { await act(url, { type, decisionId: "d4" }); seen.push(await state()); }
+    ok(same(seen, ["approved", "open", "declined", "open", "approved", "open"]), `S2 d4 follows every act and undo (${short(seen)})`);
+    await act(url, { type: "access.set", topicId: "partnerships", personId: "jonas-falk", access: { kind: "all", stages: [] } });
+    const rule = (await get(url, "/decisions/d4")).body?.rule;
+    await act(url, { type: "decisionRight.set", rule, who: "agent", personId: "jonas-falk", dailyLimit: 5 });
+    const r = await act(url, { type: "decision.approve", decisionId: "d4" }, "jonas-falk");
+    const row = (await historyRows(url, "partnerships")).find((e: any) => e.decisionId === "d4");
+    const lane = (await get(url, `/lanes/${(await get(url, "/decisions/d4")).body?.laneId}`)).body;
+    ok(r.status === 200 && row?.actor?.id === "jonas-falk" && /^Jonas/.test(lane?.standing?.headline ?? ""), `S2 a delegate's approval is credited to them (${short([r.status, row?.actor?.id, lane?.standing?.headline])})`);
+  });
+
+  await scenario("L4 a split is one act", "gtm", async url => {
+    await act(url, { type: "access.set", topicId: "partnerships", personId: "jonas-falk", access: { kind: "all", stages: [] } });
+    const lanes = async () => (await laneIds(url)).length;
+    const before = await lanes();
+    const r = await act(url, { type: "lane.file", text: "Draft a partner offer and translate the pricing page" }, "jonas-falk");
+    const added = (await lanes()) - before;
+    ok(r.status === 200 ? added === events(r).filter(e => e.type === "lane.filed").length : added === 0, `L4 a refused split files nothing (${r.status}, ${added} lanes)`);
+    const start = await lanes();
+    const filed = await act(url, { type: "lane.file", text: SPLIT_ASK });
+    ok((await lanes()) === start + 2, "L4 the split files two lanes");
+    const u = await act(url, { type: "agentAction.undo", actionId: filed.body?.receipt?.actionId });
+    ok(u.status === 200 && (await lanes()) === start, `L4 undoing the receipt takes both lanes back (${u.status}, ${start} → ${await lanes()})`);
+    const chat = await act(url, { type: "message.send", threadId: "topic:content", text: SPLIT_ASK });
+    ok(chat.status === 200 && (chat.body?.receipt?.groupLaneIds ?? []).length === 2, `L4 the same ask written in a chat splits too (${short(chat.body?.receipt?.groupLaneIds)})`);
+    const nouns = ["Review the product design and test results", "Draft the sales deck and order form", "Check the search ads and report pages"];
+    for (const text of nouns) ok(events(await act(url, { type: "lane.file", text })).filter(e => e.type === "lane.filed").length === 1, `L4 "${text}" is one ask`);
+  });
+
+  await scenario("S3 an ask that only contains a suggestion is an ask", "gtm", async url => {
+    for (const [threadId, text] of [["general", "Tell Jonas what got stuck in the export and fix it"], ["manager", "Show Lea what waits for the Halden reply"]] as const) {
+      const r = await act(url, { type: "message.send", threadId, text });
+      ok(r.status === 200 && r.body?.message?.label?.kind === "request", `S3 "${text}" in ${threadId} is a request (${r.status} ${r.body?.message?.label?.kind})`);
+    }
+  });
+
+  await scenario("E6 a live message names its addressee", "gtm", async url => {
+    const r = await act(url, { type: "message.send", threadId: "topic:partnerships", stage: "Outreach", text: "Please check batch 4 before noon" });
+    ok(r.status === 200 && r.body?.message?.addressee === "lea-brandt", `E6 a message to the Outreach stage names Lea, who runs it (${r.status} ${r.body?.message?.addressee})`);
+  });
+
+  await scenario("R1 every page kind can be visited and read as the reader", "gtm", async url => {
+    for (const target of [{ kind: "report", id: "partnerships-weekly" }, { kind: "check", id: "batch-3" }, { kind: "file", id: "file-brand-list-0" }]) {
+      const r = await act(url, { type: "recent.visit", target });
+      ok(r.status === 200, `R1 ${target.kind} can be visited (${r.status})`);
+    }
+    const off: string[] = [];
+    for (const p of PEOPLE) for (const t of await topicIds(url)) for (const l of (await getAs(url, `/topics/${t}`, p)).body?.lanes ?? []) {
+      const lane = (await getAs(url, `/lanes/${l.id}`, p)).body;
+      for (const m of lane?.made ?? []) {
+        if (!["file", "run", "review"].includes(m.target?.kind)) continue;
+        const record = await getAs(url, `/records/${m.target.id}`, p);
+        if (record.status === 200 && m.detail && record.body?.detail && record.body.detail !== m.detail) off.push(`${p} ${m.target.id}: ${record.body.detail} / ${m.detail}`);
+      }
+    }
+    ok(off.length === 0, `R1 a record reads as its lane does for the same reader (${off.slice(0, 3).join("; ")})`);
+  });
+
+  await scenario("E7 goal changes are the owner's, ranks and ids stay inside the access", "gtm", async url => {
+    await act(url, { type: "access.set", topicId: "paid", personId: "lea-brandt", access: { kind: "all", stages: [] } });
+    for (const rule of ["hardToUndo", "insideGuardrails", "overWeeklyCap", "onlyYouKnow", "inYourName"]) await act(url, { type: "decisionRight.set", rule, who: "agent", personId: "lea-brandt", dailyLimit: 20 });
+    const asks = [`Set the Paid budget to €${rand(100, 900)}00 a week`, "Set the cost per lead guardrail to €900", `Set the Paid target to ${rand(500, 900)}`, "Make Paid the top priority"];
+    const before = (await get(url, "/topics/paid")).body;
+    for (const text of asks) {
+      const { id } = await propose(url, "paid", text, "lea-brandt");
+      const r = id ? await act(url, { type: "decision.approve", decisionId: id }, "lea-brandt") : undefined;
+      ok(!id || r?.status === 403, `E7 "${text}": a delegate does not approve a goal change (${r?.status})`);
+    }
+    const now = (await get(url, "/topics/paid")).body;
+    ok(same([now?.spend?.cap, now?.goal?.target, now?.meta?.priority], [before?.spend?.cap, before?.goal?.target, before?.meta?.priority]), "E7 nothing on Paid moved");
+    await act(url, { type: "access.set", topicId: "seo", personId: "jonas-falk", access: { kind: "view", stages: [] } });
+    ok((await getAs(url, "/topics/seo", "jonas-falk")).body?.meta?.priority === null, "E7 a status-only reader does not read the owner's rank");
+    const watcher = openFeed(url, "jonas-falk");
+    await watcher.opened;
+    const { id } = await propose(url, "seo", `Set the SEO target to ${rand(20, 40)}`);
+    await act(url, { type: "decision.approve", decisionId: id });
+    await pause(300);
+    watcher.ws.close();
+    const told = watcher.frames.filter(f => ["report.changed", "check.recorded", "forecast.scored"].includes(f.type));
+    ok(told.length === 0, `E7 a status-only reader gets no report, check or forecast frame (${short(told)})`);
+  });
+}
+
 try {
   await run();
   await invariants();
   await faithful();
+  await reviewed();
 } catch (e) {
   fatal(String((e as Error)?.message ?? e));
 }
