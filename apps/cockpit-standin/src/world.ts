@@ -556,8 +556,21 @@ export class World {
 
   private hasDecisionRight(decision: DecisionView, viewer: Actor): boolean {
     if (viewer.id === this.owner.id) return true;
+    // a rank moves every ranked topic, so only someone who can read them all decides one
+    if (decision.goalChange?.field === "priority" && [...this.priorityRanks().keys()].some(id => !this.fullTopic(id, viewer))) return false;
     return this.fullTopic(decision.topicId, viewer) &&
       this.settings.decisionRights.some(right => right.rule === decision.rule && right.who === "agent" && right.personId === viewer.id);
+  }
+
+  /** A goal change as this reader may see it: the topics it reaches are the reader's own. */
+  private goalChangeFor<T extends NonNullable<DecisionView["goalChange"]>>(change: T, viewer: Actor): T {
+    return { ...change, affectedTopics: change.affectedTopics.filter(id => this.fullTopic(id, viewer)) };
+  }
+
+  /** The line under a decision: a proposed change's line names only topics the reader can read. */
+  private decisionDetail<L extends string | null>(decision: DecisionView, viewer: Actor, line: L): L | string {
+    if (!decision.goalChange || line !== this.goalChangeDetail(decision.goalChange)) return line;
+    return this.goalChangeDetail(this.goalChangeFor(decision.goalChange, viewer));
   }
 
   private requireDecisionRight(decision: DecisionView, viewer: Actor): void {
@@ -761,7 +774,7 @@ export class World {
 
   private queue(viewer: Actor): DecisionQueueView {
     const items = [...this.decisions.values()].filter(d => this.fullTopic(d.topicId, viewer)).map(d => ({
-      id: d.id, title: d.title, state: d.state, topicName: d.topicName, target: target("decision", d.id), goalChange: d.goalChange, proposer: d.proposer,
+      id: d.id, title: d.title, state: d.state, topicName: d.topicName, target: target("decision", d.id), goalChange: d.goalChange && this.goalChangeFor(d.goalChange, viewer), proposer: d.proposer,
     }));
     return { items, total: items.length, open: items.filter(item => item.state === "open").length };
   }
@@ -780,7 +793,9 @@ export class World {
       const state = match.kind === "ok" || match.kind === "now" || match.kind === "todo" ? match.kind : step.state;
       return { ...step, state, doneAt: match.doneAt };
     });
-    return { ...decision, nextSteps, position: { index: queue.items.findIndex(item => item.id === id) + 1, of: queue.total, open: queue.open } };
+    return { ...decision, goalChange: decision.goalChange && this.goalChangeFor(decision.goalChange, viewer),
+      cardContext: this.decisionDetail(decision, viewer, decision.cardContext), context: this.decisionDetail(decision, viewer, decision.context),
+      nextSteps, position: { index: queue.items.findIndex(item => item.id === id) + 1, of: queue.total, open: queue.open } };
   }
 
   private brief(viewer: Actor): BriefView {
@@ -788,7 +803,7 @@ export class World {
     const view = structuredClone(this.briefBase);
     view.decisions = [...this.decisions.values()].filter(d => this.fullTopic(d.topicId, viewer)).map(d => ({
       id: d.id, topicId: d.topicId, topicName: d.topicName, title: d.title, dueAt: d.dueAt, whyYours: d.whyYours ?? "",
-      context: d.cardContext, minutes: d.minutes, doneNote: d.doneNote, laneId: d.laneId, state: d.state, rule: d.rule, proposer: d.proposer,
+      context: this.decisionDetail(d, viewer, d.cardContext), minutes: d.minutes, doneNote: d.doneNote, laneId: d.laneId, state: d.state, rule: d.rule, proposer: d.proposer,
     }));
     view.openCount = view.decisions.filter(d => d.state === "open").length;
     view.minutes = view.decisions.filter(d => d.state === "open").reduce((total, d) => total + d.minutes, 0);
@@ -1011,7 +1026,8 @@ export class World {
     const changes = this.approvedChanges().filter(change => change.topicId === id || change.affectedTopics.includes(id));
     view.appliedGoalChanges = [];
     if (this.fullTopic(id, viewer)) {
-      view.appliedGoalChanges = changes.filter(change => change.topicId === id || this.fullTopic(change.topicId, viewer));
+      view.appliedGoalChanges = changes.filter(change => change.topicId === id || this.fullTopic(change.topicId, viewer))
+        .map(change => this.goalChangeFor(change, viewer));
     }
     if (view.goal) {
       const goal = view.goal;
@@ -1727,10 +1743,11 @@ export class World {
       if (sw.detail && previous != null && amount != null && previous !== amount) {
         sw.detail = sw.limit.kind === "money"
           ? sw.detail.replaceAll(eurosLabel(previous), eurosLabel(amount))
-          : sw.detail.replace(new RegExp(`\\b${previous}\\b`, "g"), String(amount));
+          : sw.detail.replace(new RegExp(`\\b${previous}\\b(?!%)`, "g"), String(amount));
       }
       sw.limit = structuredClone(next);
     }
+    for (const sw of view.guardrails) sw.detail = this.switchRates(sw.id, sw.detail);
     return view;
   }
 
@@ -1740,6 +1757,17 @@ export class World {
       if (item) return item;
     }
     return undefined;
+  }
+
+  /** A percentage a switch states beside its limit ("pause at 4% bounces") follows the linked guardrail it names. */
+  private switchRates(switchId: string | null, detail: string): string {
+    let text = detail;
+    for (const change of this.approvedChanges()) {
+      const item = change.guardrail ? this.storedGuardrail(change.guardrail.guardrailId) : undefined;
+      if (!change.guardrail || !item || item.switchId !== switchId || change.guardrail.to.kind !== "rate") continue;
+      text = text.replace(new RegExp(`\\d+(?:\\.\\d+)?(?=% ${item.what.toLowerCase()}\\b)`, "g"), String(change.guardrail.to.percent));
+    }
+    return text;
   }
 
   /** The switch's limit after the approved limits a switch states: only the number changes, the shape stays. */
@@ -2704,7 +2732,7 @@ export class World {
   }
 
   private goalChangeDetail(change: NonNullable<DecisionView["goalChange"]>): string {
-    if (change.topicId === "partnerships" && change.affectedTopics.includes("paid")) return "Paid's partner budget and the Friday report follow the new goal.";
+    if ((change.field === "deadline" || change.field === "target") && change.topicId === "partnerships" && change.affectedTopics.includes("paid")) return "Paid's partner budget and the Friday report follow the new goal.";
     if (change.field === "budget") return "The new budget applies to this topic's plan.";
     if (change.field === "priority") return "The new priority applies across this module's topics.";
     if (change.field === "guardrail") return "The new guardrail applies to this topic's plan.";

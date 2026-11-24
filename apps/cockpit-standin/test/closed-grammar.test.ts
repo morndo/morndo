@@ -85,10 +85,18 @@ describe("the goal ask grammar", () => {
     expect(read("Set the daily spend guardrail to €210 a day")).toBeNull();
   });
 
+  it("asks back for a malformed number or a percentage over 100", () => {
+    expect(read("Set the Atlas budget to €12,34,56")).toBeNull();
+    expect(read("Set the refunds guardrail to 300%")).toBeNull();
+  });
+
   it("takes a unit only when it is the goal's own or a plain new one", () => {
     expect(read("Set the Atlas target to 30 deals")?.unit).toBeNull();
     expect(read("Set the Atlas target to 30 signed deals")?.unit).toBeNull();
-    expect(read("Set the Atlas target to 30 contracts")?.unit).toBe("contracts");
+    expect(read("Set the Atlas target to 30 contracts")).toBeNull();
+    expect(read("Set the Atlas target to 30 via referrals")).toBeNull();
+    expect(read("Set the Atlas target to 2 hundred deals")).toBeNull();
+    expect(read("Set the Atlas target to 30 qualified deals")?.unit).toBe("qualified deals");
     expect(read("Set the Atlas target to 30 this quarter")).toBeNull();
     expect(read("Set the Atlas target to 30 for December")).toBeNull();
   });

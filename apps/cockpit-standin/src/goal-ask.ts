@@ -39,7 +39,9 @@ export function measuredNumber(value: MeasuredValue | null | undefined): number 
 
 /** "8,000", "8.000", "12.500,50" and "1.5" as numbers: groups of three are thousands, anything else after the last mark is decimals. */
 export function amountOf(digits: string): number {
-  if (/^\d{1,3}(?:[.,]\d{3})+$/.test(digits)) return Number(digits.replace(/[.,]/g, ""));
+  if (/^[1-9]\d{0,2}(?:[.,]\d{3})+$/.test(digits)) return Number(digits.replace(/[.,]/g, ""));
+  // one kind of mark for thousands and at most one other before the decimals; "12,34,56" is no number
+  if (!/^\d+(?:[.,]\d+)?$/.test(digits) && !/^[1-9]\d{0,2}(?:,\d{3})+\.\d+$/.test(digits) && !/^[1-9]\d{0,2}(?:\.\d{3})+,\d+$/.test(digits)) return NaN;
   const mark = Math.max(digits.lastIndexOf("."), digits.lastIndexOf(","));
   if (mark < 0) return Number(digits);
   return Number(`${digits.slice(0, mark).replace(/[.,]/g, "")}.${digits.slice(mark + 1)}`);
@@ -138,10 +140,10 @@ const DOWN = new Set(["lower", "cut", "reduce", "decrease", "drop", "trim", "shr
 const SET = new Set(["set", "change", "make", "put", "bring", "move", "update", "adjust", "hold", "keep", "give", "tighten", "loosen"]);
 const direction = (word: string): "up" | "down" | "set" | undefined => UP.has(word) ? "up" : DOWN.has(word) ? "down" : SET.has(word) ? "set" : undefined;
 
-const verb = (only?: "up" | "down"): Pat => bind("verb", function* (tokens, at) {
+const verb = (...only: ("up" | "down" | "set")[]): Pat => bind("verb", function* (tokens, at) {
   const token = tokens[at];
   const dir = token?.k === "w" ? direction(token.s) : undefined;
-  if (dir && (!only || dir === only)) yield [at + 1, dir];
+  if (dir && (only.length === 0 || only.includes(dir))) yield [at + 1, dir];
 });
 const PRE: Pat = [opt("please"), opt(verb())];
 const PRE_RELATIVE: Pat = [opt("please"), verb()];
@@ -153,7 +155,7 @@ const intro = (...more: string[]): Pat => alt([",", "set", "it", "to"], plainInt
 const plainIntro = (...more: string[]): Pat => some([
   opt(":"),
   opt(alt(["is", "now"], "is", ["should", "be"], ["must", "be"], ["will", "be"], ["to", "be"], "becomes", "moves", "goes", "now")),
-  opt(alt("to", "at", "of", ...more)),
+  opt(alt("to", "at", ...more)),
   opt(alt(["at", "most"], ["no", "more", "than"], ["up", "to"])),
 ]);
 
@@ -184,13 +186,18 @@ function* amountsAt(tokens: Tok[], at: number): Generator<[number, Amount]> {
   const value = number.v * (number.mult || !k ? 1 : 1000);
   let pct = false;
   if (tokens[j]?.k === "%") {
+    // a percentage has no thousands: "1.125%" has decimals
     pct = true;
+    if (!cur && !k) {
+      yield [j + 1, { v: Number(number.s.replace(",", ".")), cur: false, pct: true, k: false }];
+      return;
+    }
     j++;
   } else if (!cur && tokens[j]?.k === "c") {
     cur = true;
     j++;
   }
-  if (cur && pct) return;
+  if (pct) return;
   yield [j, { v: value, cur, pct, k }];
 }
 const amountSlot = (key: string): Pat => bind(key, function* (tokens, at) { yield* amountsAt(tokens, at); });
@@ -332,12 +339,12 @@ const spanSlot = (key: string, most = 6): Pat => function* (tokens, state) {
 
 // ---- the shapes
 
-const MORE = ["on", "until", "by"];
 const NOUN_GOAL = alt("target", "goal");
 const BUDGET = ["budget", opt("cap")] satisfies Pat[];
 const T = topicSlot("topic");
 const LEAD = [PRE, DET] satisfies Pat[];
-const AFTER_NUMBER: Pat[] = [opt(spanSlot("unit")), opt([alt(...MORE), dateSlot]), TAIL];
+const MOVE = [opt("please"), opt(verb("up", "set")), DET] satisfies Pat[];
+const AFTER_NUMBER: Pat[] = [opt(spanSlot("unit")), opt(["by", dateSlot]), TAIL];
 const DEADLINE_NOUN = alt("deadline", ["due", "date"], ["end", "date"]);
 
 type Shape = { field: GoalAsk["field"]; pat: Pat; relative?: boolean };
@@ -345,19 +352,19 @@ const SHAPES: Shape[] = [
   // budget
   { field: "budget", pat: [...LEAD, opt(T), ...BUDGET, intro(), amountSlot("amount"), opt(periodSlot), TAIL] },
   { field: "budget", pat: [...LEAD, ...BUDGET, alt("for", "of"), T, intro(), amountSlot("amount"), opt(periodSlot), TAIL] },
-  { field: "budget", pat: [PRE, T, DET, ...BUDGET, "of", amountSlot("amount"), opt(periodSlot), TAIL] },
-  { field: "budget", pat: [opt("please"), DET, ...BUDGET, "of", amountSlot("amount"), opt(periodSlot), "for", T, TAIL] },
+  { field: "budget", pat: [opt("please"), "give", T, alt("a", "an"), ...BUDGET, "of", amountSlot("amount"), opt(periodSlot), TAIL] },
+  { field: "budget", pat: [opt("please"), opt(alt("a", "an")), ...BUDGET, "of", amountSlot("amount"), opt(periodSlot), "for", T, TAIL] },
   { field: "budget", relative: true, pat: [PRE_RELATIVE, DET, opt(T), ...BUDGET, "by", amountSlot("amount"), opt(periodSlot), TAIL] },
   { field: "budget", relative: true, pat: [PRE_RELATIVE, DET, ...BUDGET, alt("for", "of"), T, "by", amountSlot("amount"), opt(periodSlot), TAIL] },
   // target or goal, with a unit and a date when the sentence says them
   { field: "target", pat: [...LEAD, opt(T), NOUN_GOAL, intro(), amountSlot("amount"), ...AFTER_NUMBER] },
   { field: "target", pat: [...LEAD, NOUN_GOAL, alt("for", "of"), T, intro(), amountSlot("amount"), ...AFTER_NUMBER] },
-  { field: "target", pat: [...LEAD, NOUN_GOAL, "of", amountSlot("amount"), opt(spanSlot("unit")), "for", T, TAIL] },
+  { field: "target", pat: [opt("please"), opt(alt("a", "an")), NOUN_GOAL, "of", amountSlot("amount"), opt(spanSlot("unit")), "for", T, TAIL] },
   { field: "target", relative: true, pat: [PRE_RELATIVE, DET, opt(T), NOUN_GOAL, "by", amountSlot("amount"), opt(spanSlot("unit")), TAIL] },
   { field: "unit", pat: [...LEAD, opt(T), opt(NOUN_GOAL), "unit", intro(), spanSlot("unit", 4), TAIL] },
   // deadline
-  { field: "deadline", pat: [...LEAD, opt(T), DEADLINE_NOUN, opt("back"), intro(...MORE, "for"), dateSlot, TAIL] },
-  { field: "deadline", pat: [...LEAD, DEADLINE_NOUN, alt("for", "of"), T, intro(...MORE), dateSlot, TAIL] },
+  { field: "deadline", pat: [...MOVE, opt(T), DEADLINE_NOUN, opt("back"), intro("until"), dateSlot, TAIL] },
+  { field: "deadline", pat: [...MOVE, DEADLINE_NOUN, alt("for", "of"), T, intro("until"), dateSlot, TAIL] },
   // priority
   { field: "priority", pat: [...LEAD, "priority", alt("of", "for"), T, intro(), rankSlot("rank", true), TAIL_PRIORITY] },
   { field: "priority", pat: [...LEAD, opt(T), "priority", opt(intro()), rankSlot("rank", true), TAIL_PRIORITY] },
@@ -388,7 +395,7 @@ const NOT = new Set(["not", "never", "unless", "instead", "except", "if", "but",
 // What a unit never holds: a time, a comparison, a connective, a hedge.
 const UNIT_STOP = new Set(["this", "next", "last", "per", "each", "every", "for", "instead", "unless", "not", "no", "if", "except", "but", "and", "or",
   "then", "than", "from", "once", "after", "before", "when", "while", "until", "by", "on", "at", "in", "the", "a", "an", "of", "to", "with", "without",
-  "about", "around", "roughly", "approximately", "more", "less", "most", "least", "please", "now", "thanks", "today", "tomorrow", "tonight", "week",
+  "about", "around", "roughly", "approximately", "more", "less", "most", "least", "please", "now", "thanks", "today", "tomorrow", "tonight", "whatever", "something", "anything", "works", "week",
   "weeks", "month", "months", "quarter", "year", "years", "day", "days", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
   ...MONTHS, ...Object.keys(MONTH_SHORT)]);
 
@@ -413,6 +420,14 @@ function unitOf(span: Tok[], goalUnit: string): { own: true } | { own: false; un
   const last = span.at(-1)?.s ?? "";
   if (span.length > 3 || span.some(token => token.k !== "w" || UNIT_STOP.has(token.s)) || last.length < 4 || !last.endsWith("s") || last.endsWith("ss")) return null;
   return { own: false, unit: span.map(token => token.raw).join(" ") };
+}
+
+/** After a number a new unit only narrows the goal's own: one word like "qualified" before its noun ("4 qualified partners"). */
+function narrows(span: Tok[], goalUnit: string): boolean {
+  const noun = tokenize(goalUnit).filter(token => token.k === "w").at(-1);
+  const [narrower, last] = span;
+  return span.length === 2 && noun !== undefined && last !== undefined && sameToken(last, noun)
+    && narrower?.k === "w" && /[a-z]{3}ed$/.test(narrower.s) && narrower.s !== "hundred";
 }
 
 function buildGuardrail(relative: boolean, env: Env, cx: Cx): GoalAsk | null {
@@ -447,9 +462,9 @@ function buildGuardrail(relative: boolean, env: Env, cx: Cx): GoalAsk | null {
     }
     to = { ...limit, value };
   } else if (limit.kind === "rate") {
-    if (amount.cur || env.trail) return null;
+    if (amount.cur || env.trail || (relative && amount.pct)) return null;
     const percent = tidy(relative ? reading + sign * amount.v : amount.v);
-    if (percent < 0) return null;
+    if (!(percent >= 0 && percent <= 100)) return null;
     to = { ...limit, percent };
   } else return null;
   if (limit.kind === "money" && env.trail) return null;
@@ -471,6 +486,8 @@ function build(field: GoalAsk["field"], relative: boolean, env: Env, cx: Cx): Go
   const goal = topic.goal;
   if (field === "budget") {
     const cap = topic.cap;
+    // caps are weekly: an amount a day or a month cannot be added to one
+    if (relative && env.period && env.period !== "week") return null;
     if (!amount || !cap || !isEuro(cap) || amount.pct || !(amount.cur || amount.k)) return null;
     const asked = minorOf(amount.v);
     if (asked === null) return null;
@@ -493,7 +510,7 @@ function build(field: GoalAsk["field"], relative: boolean, env: Env, cx: Cx): Go
       const read = unitOf(span, goal.unit);
       if (!read) return null;
       if (!read.own) {
-        if (read.unit.toLowerCase() === goal.unit.toLowerCase()) return null;
+        if ((field === "target" && !narrows(span, goal.unit)) || read.unit.toLowerCase() === goal.unit.toLowerCase()) return null;
         unit = read.unit;
       }
       if (field === "unit" && !unit) return null;
@@ -522,10 +539,13 @@ function build(field: GoalAsk["field"], relative: boolean, env: Env, cx: Cx): Go
     else if (typeof env.ref === "string" && (env.rel || env.cmp)) {
       const other = cx.topics.find(item => item.id === env.ref);
       if (!other || other.rank === null || other.id === topic.id) return null;
+      const above = (env.rel ?? env.cmp) === "above";
+      if ((dir === "down" && above) || (dir === "up" && !above)) return null;
       const close = from < other.rank ? other.rank - 1 : other.rank;
-      to = (env.rel ?? env.cmp) === "above" ? close : close + 1;
+      to = above ? close : close + 1;
     } else if (relative) to = from - sign;
     if (to === undefined || to < 1 || to > cx.ranked) return null;
+    if ((dir === "down" && to <= from) || (dir === "up" && to > from)) return null;
     return { ...BLANK, topicId: topic.id, field, from, to, priority: { from, to } };
   }
   return null;
