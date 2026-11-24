@@ -405,7 +405,35 @@ export class World {
     }
   }
 
+  /** A command's effect, plus the events for what it changed without saying so: delegated counts and schedules. */
   act(command: Command, viewer: Actor = this.owner): Effect {
+    const used = this.usedTodayFingerprint();
+    const schedules = this.scheduleSnapshot();
+    const effect = this.run(command, viewer);
+    if (this.usedTodayFingerprint() !== used && !effect.events.some(event => event.type === "decisionRight.changed")) {
+      effect.events.push({ type: "decisionRight.changed" });
+    }
+    effect.events.push(...this.scheduleEvents(schedules, effect.events));
+    return effect;
+  }
+
+  private usedTodayFingerprint(): string {
+    return JSON.stringify(this.decisionRights(this.owner).map(right => [right.rule, right.usedToday]));
+  }
+
+  private scheduleSnapshot(): Map<string, string> {
+    return new Map(this.schedules().map(item => [item.id, JSON.stringify([item.rrule, item.text, item.time, item.nextAt, item.on])]));
+  }
+
+  /** One `schedule.changed` for each schedule that is new, gone or moved since `before`, unless the events already name it. */
+  private scheduleEvents(before: Map<string, string>, known: Event[]): Event[] {
+    const after = this.scheduleSnapshot();
+    const named = new Set(known.flatMap(event => event.type === "schedule.changed" ? [event.scheduleId] : []));
+    return [...new Set([...before.keys(), ...after.keys()])].filter(id => before.get(id) !== after.get(id) && !named.has(id))
+      .map((scheduleId): Event => ({ type: "schedule.changed", scheduleId }));
+  }
+
+  private run(command: Command, viewer: Actor): Effect {
     if (viewer.membershipState === "invited" && command.type !== "access.accept") {
       throw new Problem("forbidden", "Accept the invitation before changing shared work.");
     }
@@ -3045,6 +3073,14 @@ export class World {
   }
 
   advance(at: string): Event[] {
+    if (Date.parse(at) <= Date.parse(this.now)) return [];
+    const schedules = this.scheduleSnapshot();
+    const events = this.tick(at);
+    events.push(...this.scheduleEvents(schedules, events));
+    return events;
+  }
+
+  private tick(at: string): Event[] {
     const now = Date.parse(at);
     if (now <= Date.parse(this.now)) return [];
     const nextBrief = this.nextBrief(this.prefsOf(this.owner).briefsPerDay);

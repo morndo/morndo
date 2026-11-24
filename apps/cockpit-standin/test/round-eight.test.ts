@@ -164,3 +164,71 @@ describe("revoking an accepted invitation", () => {
     expect(read("MembersView").invitations.some((item: any) => item.id === invitation.id)).toBe(false);
   });
 });
+
+function actor(world: World) {
+  const read = (definition: string, id = "", as?: string) => asAny(world.read(definition, id, query, as ? world.viewer(as) : world.owner));
+  const act = (command: Record<string, unknown>, as?: string) => asAny(world.act(command as never, as ? world.viewer(as) : world.owner));
+  return { read, act };
+}
+
+describe("decisionRight.changed", () => {
+  it("is emitted whenever a command changes usedToday, undo and redo included", () => {
+    const world = new World("gtm");
+    const { read, act } = actor(world);
+    const rule = read("DecisionView", "d4").rule;
+    act({ type: "access.set", topicId: "partnerships", personId: "jonas-falk", access: { kind: "all", stages: [] } });
+    act({ type: "decisionRight.set", rule, who: "agent", personId: "jonas-falk", dailyLimit: 3 });
+    const used = () => (read("SettingsView").decisionRights as any[]).find(item => item.rule === rule).usedToday;
+    const base = used();
+    const changed = (result: any) => result.events.filter((event: any) => event.type === "decisionRight.changed").length;
+    const approved = act({ type: "decision.approve", decisionId: "d4" }, "jonas-falk");
+    expect(used()).toBe(base + 1);
+    expect(changed(approved)).toBe(1);
+    const undone = act({ type: "decision.undo", decisionId: "d4" }, "jonas-falk");
+    expect(used()).toBe(base);
+    expect(changed(undone)).toBe(1);
+    const row = (read("HistoryPage", "partnerships").days as any[]).flatMap(day => day.entries).find((entry: any) => entry.decisionId === "d4");
+    const redone = act({ type: "agentAction.redo", actionId: row.id }, "jonas-falk");
+    expect(used()).toBe(base + 1);
+    expect(changed(redone)).toBe(1);
+    const undoneAgain = act({ type: "agentAction.undo", actionId: row.id }, "jonas-falk");
+    expect(used()).toBe(base);
+    expect(changed(undoneAgain)).toBe(1);
+    expect(changed(act({ type: "prefs.set", briefsPerDay: 2 }))).toBe(0);
+  });
+});
+
+describe("schedule.changed", () => {
+  const scheduleEvents = (events: any[]) => events.filter(event => event.type === "schedule.changed").map(event => event.scheduleId as string).sort();
+
+  it("names each schedule a command adds, removes or moves", () => {
+    const world = new World("gtm");
+    const { read, act } = actor(world);
+    const ids = () => (read("ManagerView").schedules as any[]).map(item => item.id as string);
+    const before = ids();
+    expect(before).toEqual(expect.arrayContaining(["brief-0715", "brief-1300", "brief-1800"].filter(id => before.includes(id))));
+    const briefs = before.filter(id => id.startsWith("brief-"));
+    const one = act({ type: "prefs.set", briefsPerDay: 1 });
+    const after = ids();
+    const gone = before.filter(id => !after.includes(id));
+    expect(gone.length).toBeGreaterThan(0);
+    for (const id of gone) expect(scheduleEvents(one.events)).toContain(id);
+    const back = act({ type: "prefs.set", briefsPerDay: 3 });
+    const restored = ids();
+    for (const id of restored.filter(id => !after.includes(id))) expect(scheduleEvents(back.events)).toContain(id);
+    expect(restored.filter(id => id.startsWith("brief-")).length).toBe(briefs.length);
+    expect(scheduleEvents(act({ type: "prefs.set", briefsPerDay: 3 }).events)).toEqual([]);
+  });
+
+  it("names the brief schedules the clock moves", () => {
+    const world = new World("gtm");
+    const { read } = actor(world);
+    const next = (id: string) => (read("ManagerView").schedules as any[]).find(item => item.id === id)?.nextAt;
+    const brief = (read("ManagerView").schedules as any[]).find(item => item.kind === "brief" && Date.parse(item.nextAt) > Date.parse(DEMO_AT));
+    const was = next(brief.id);
+    const events = world.advance(new Date(Date.parse(was) + 60000).toISOString());
+    expect(next(brief.id)).not.toBe(was);
+    expect(scheduleEvents(events)).toContain(brief.id);
+    expect(scheduleEvents(world.advance(new Date(Date.parse(was) + 120000).toISOString()))).not.toContain("friday-check");
+  });
+});
