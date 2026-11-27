@@ -1,6 +1,6 @@
 import { once } from "node:events";
 import type {
-  BriefView, Command, CommandResult, DecisionQueueView, DecisionView, FeedEvent, LaneView, MembersView, SidebarView, ThreadView, TopicView,
+  BriefView, Command, CommandResult, DecisionQueueView, DecisionView, FeedEvent, HistoryPage, LaneView, MembersView, SidebarView, ThreadView, TopicView,
 } from "@morndo/cockpit-api";
 import { expect, it } from "vitest";
 import { WebSocket } from "ws";
@@ -17,15 +17,15 @@ async function withCockpit(module: Module, run: (url: string) => Promise<void>) 
 }
 
 function reader(url: string, as?: string) {
-  const suffix = as ? `?as=${as}` : "";
+  const search = (path: string) => as ? `${path.includes("?") ? "&" : "?"}as=${as}` : "";
   return {
     async read<T>(path: string): Promise<T> {
-      const response = await fetch(url + path + suffix);
+      const response = await fetch(url + path + search(path));
       expect(response.status, path).toBe(200);
       return await response.json() as T;
     },
     async act(command: Command, status = 200): Promise<CommandResult> {
-      const response = await fetch(url + "/actions" + suffix, {
+      const response = await fetch(url + "/actions" + search("/actions"), {
         method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(command),
       });
       expect(response.status, command.type).toBe(status);
@@ -34,8 +34,11 @@ function reader(url: string, as?: string) {
   };
 }
 
-function feed(url: string, as: string) {
-  const socket = new WebSocket(url.replace("http", "ws") + `/feed?as=${as}`);
+function feed(url: string, as?: string, after?: number) {
+  const query = new URLSearchParams();
+  if (as) query.set("as", as);
+  if (after !== undefined) query.set("after", String(after));
+  const socket = new WebSocket(url.replace("http", "ws") + `/feed?${query}`);
   const frames: FeedEvent[] = [];
   socket.on("message", data => {
     const buffer = Array.isArray(data) ? Buffer.concat(data) : Buffer.isBuffer(data) ? data : Buffer.from(data);
@@ -46,6 +49,15 @@ function feed(url: string, as: string) {
 
 const grant = (topicId: string, personId: string, kind: "all" | "view" = "all"): Command =>
   ({ type: "access.set", topicId, personId, access: { kind, stages: [] } });
+
+async function join(url: string, topicId: string, nameOrEmail: string) {
+  const owner = reader(url);
+  await owner.act({ type: "access.invite", topicId, nameOrEmail });
+  const invitation = (await owner.read<MembersView>("/members")).invitations.find(item => item.nameOrEmail === nameOrEmail);
+  if (!invitation) throw new Error("Missing invitation for the test reader");
+  await reader(url, invitation.personId).act({ type: "access.accept", invitationId: invitation.id });
+  return invitation.personId;
+}
 
 async function proposal(owner: ReturnType<typeof reader>, chat: string, text: string) {
   const { message } = await owner.act({ type: "message.send", threadId: `topic:${chat}`, text });
@@ -245,5 +257,170 @@ it("R3 includes a shared-resource topic outside the ranks Research passes", asyn
     const linked = await proposal(owner, "outbound", text);
     expect(linked.goalChange).toMatchObject({ priority: { from: 6, to: 5 }, previousUnit: null });
     expect(linked.goalChange?.affectedTopics.toSorted()).toEqual(["paid", "seo"]);
+  });
+});
+
+it("Q1 projects a cross-topic decision link in thread reads and live and replayed messages", async () => {
+  await withCockpit("gtm", async url => {
+    const owner = reader(url);
+    const personId = await join(url, "paid", "tess-quill@example.test");
+    const guest = reader(url, personId);
+    await owner.act(grant("paid", personId));
+    const checkpoint = await owner.act(grant("content", personId, "view"));
+    const after = checkpoint.events.at(-1)!.seq;
+    const live = feed(url, personId);
+    await live.ready;
+
+    const threadId = "topic:paid";
+    const result = await owner.act({ type: "message.send", threadId, text: "Increase the Content target by 17" });
+    const decisionId = result.message?.decisionId;
+    expect(decisionId).toBeTruthy();
+    const ids = new Set(result.events.flatMap(event => event.type === "message.posted" ? [event.message.id] : []));
+    expect(ids.size).toBe(2);
+    const links = async () => (await guest.read<ThreadView>(`/threads/${threadId}`)).messages
+      .filter(message => ids.has(message.id)).map(message => message.decisionId);
+    const feedLinks = (frames: FeedEvent[]) => frames.flatMap(event =>
+      event.type === "message.posted" && ids.has(event.message.id) ? [event.message.decisionId] : []);
+    await expect.poll(() => feedLinks(live.frames).length).toBe(2);
+    const replay = feed(url, personId, after);
+    await replay.ready;
+    await expect.poll(() => feedLinks(replay.frames).length).toBe(2);
+    expect({ thread: await links(), live: feedLinks(live.frames), replay: feedLinks(replay.frames) })
+      .toEqual({ thread: [null, null], live: [null, null], replay: [null, null] });
+
+    await owner.act(grant("content", personId));
+    expect(await links()).toEqual([decisionId, decisionId]);
+    const allowedReplay = feed(url, personId, after);
+    await allowedReplay.ready;
+    await expect.poll(() => feedLinks(allowedReplay.frames)).toEqual([decisionId, decisionId]);
+  });
+});
+
+it("Q2 approval history and Undo frames skip an invited stage reader who cannot open the decision", async () => {
+  await withCockpit("gtm", async url => {
+    const owner = reader(url);
+    const personId = await join(url, "partnerships", "sam-larch@example.test");
+    const fullId = await join(url, "partnerships", "devon-pike@example.test");
+    await owner.act(grant("partnerships", fullId));
+    await owner.act({ type: "access.set", topicId: "partnerships", personId, access: { kind: "stages", stages: ["Offers"] } });
+    const stage = feed(url, personId);
+    const full = feed(url, fullId);
+    await Promise.all([stage.ready, full.ready]);
+    const rows = async (id: string) => (await reader(url, id).read<HistoryPage>("/topics/partnerships/history?laneId=halden-offer"))
+      .days.flatMap(day => day.entries).filter(row => row.kind === "event" && row.decisionId === "d4");
+
+    await owner.act({ type: "decision.approve", decisionId: "d4" });
+    expect(await rows(fullId)).not.toHaveLength(0);
+    const undo = await owner.act({ type: "decision.undo", decisionId: "d4" });
+    const action = undo.events.find(event => event.type === "agentAction.changed");
+    expect(action).toBeDefined();
+    await expect.poll(() => full.frames.some(frame => frame.seq === action?.seq)).toBe(true);
+    await expect.poll(() => stage.frames.some(frame => frame.type === "lane.changed" && frame.laneId === "halden-offer")).toBe(true);
+    expect({ rows: await rows(personId), undo: stage.frames.some(frame => frame.seq === action?.seq) })
+      .toEqual({ rows: [], undo: false });
+  });
+});
+
+it("Q3 files an ordinary request mentioning a unit and still parses a requested change to the goal unit", async () => {
+  await withCockpit("gtm", async url => {
+    const owner = reader(url);
+    const work = await owner.act({
+      type: "message.send", threadId: "topic:content", text: "Deliver the display unit to the Alder Hall reception",
+    });
+    expect(work).toMatchObject({ laneId: expect.any(String), message: { decisionId: null, label: { kind: "request" } } });
+    const change = await proposal(owner, "content", "Change the Content unit to registrations");
+    expect(change.goalChange).toMatchObject({ topicId: "content", field: "unit", unit: "registrations" });
+  });
+});
+
+it("Q4 updates a pending Paid move when Content changes its starting rank and freezes what approval moved", async () => {
+  await withCockpit("gtm", async url => {
+    const owner = reader(url);
+    const pending = await proposal(owner, "paid", "Set Paid priority to 5");
+    const content = await proposal(owner, "content", "Give Content priority 6");
+    await owner.act({ type: "decision.approve", decisionId: content.id });
+    const change = async () => (await owner.read<DecisionView>(`/decisions/${pending.id}`)).goalChange;
+    expect(await change()).toMatchObject({ priority: { from: 3, to: 5 }, affectedTopics: ["partnerships", "seo", "research"] });
+    await owner.act({ type: "decision.approve", decisionId: pending.id });
+    const applied = await change();
+    expect(applied).toMatchObject({ priority: { from: 3, to: 5 }, affectedTopics: ["partnerships", "seo", "research"] });
+    for (const id of ["seo", "research"]) {
+      expect((await owner.read<TopicView>(`/topics/${id}`)).appliedGoalChanges).toContainEqual(applied);
+    }
+    const research = await proposal(owner, "research", "Give Research priority 1");
+    await owner.act({ type: "decision.approve", decisionId: research.id });
+    expect(await change()).toEqual(applied);
+  });
+});
+
+it("Q5 notifies the owner and Billing delegate when a decline or history redo changes their brief", async () => {
+  await withCockpit("dev", async url => {
+    const owner = reader(url);
+    const personId = await join(url, "billing", "rowan-beck@example.test");
+    const delegate = reader(url, personId);
+    await owner.act(grant("billing", personId));
+    await owner.act({ type: "decisionRight.set", rule: "hardToUndo", who: "agent", personId, dailyLimit: 60 });
+    const feeds = [feed(url), feed(url, personId)];
+    await Promise.all(feeds.map(item => item.ready));
+    const count = async () => (await delegate.read<BriefView>("/brief")).openCount;
+    expect(await count()).toBe(1);
+    const commands: Command[] = [
+      { type: "decision.decline", decisionId: "d2" },
+      { type: "decision.undo", decisionId: "d2" },
+      { type: "agentAction.redo", actionId: "decision-d2" },
+    ];
+    for (const [index, command] of commands.entries()) {
+      await (index === 2 ? owner : delegate).act(command);
+      expect(await count()).toBe(index % 2);
+      for (const { frames } of feeds) {
+        await expect.poll(() => frames.filter(frame => frame.type === "brief.changed").length).toBe(index + 1);
+      }
+    }
+  });
+});
+
+it("Q7 reflects the Content holder and the actor who declined, even after the right moves", async () => {
+  await withCockpit("gtm", async url => {
+    const owner = reader(url);
+    const personId = await join(url, "content", "avery-glen@example.test");
+    const observerId = await join(url, "content", "morgan-flint@example.test");
+    const holder = reader(url, personId);
+    const observer = reader(url, observerId);
+    for (const id of [personId, observerId]) await owner.act(grant("content", id));
+    await owner.act({ type: "decisionRight.set", rule: "inYourName", who: "agent", personId, dailyLimit: 60 });
+    const lane = (who: ReturnType<typeof reader>) => who.read<LaneView>("/lanes/fenwick");
+    const open = await lane(holder);
+    const waiting = await observer.read<DecisionView>("/decisions/d3");
+    const lede = (await holder.read<BriefView>("/brief")).lede;
+    expect({ stateWord: open.stateWord, headline: open.standing.headline, why: waiting.whyYours, lede })
+      .toMatchObject({ stateWord: "Waits for you", headline: "It waits for you.", why: expect.stringMatching(/^Avery\b/i), lede: expect.stringMatching(/one decision/i) });
+
+    await holder.act({ type: "decision.decline", decisionId: "d3" });
+    await owner.act({ type: "decisionRight.set", rule: "inYourName", who: "agent", personId: observerId, dailyLimit: 60 });
+    expect((await lane(observer)).standing).toMatchObject({ headline: "Avery declined it.", detail: "Avery declined it." });
+    expect((await holder.read<BriefView>("/brief")).lede).toMatch(/no decisions/i);
+  });
+});
+
+it("Q9 updates the dev sign-in lane and Web topic when Only You Know is handed back", async () => {
+  await withCockpit("dev", async url => {
+    const owner = reader(url);
+    const personId = await join(url, "web", "jules-fir@example.test");
+    const limitedId = await join(url, "web", "blair-reed@example.test");
+    await owner.act(grant("web", personId));
+    await owner.act(grant("web", limitedId, "view"));
+    await owner.act({ type: "decisionRight.set", rule: "onlyYouKnow", who: "agent", personId, dailyLimit: 5 });
+    const delegate = reader(url, personId);
+    expect((await delegate.read<LaneView>("/lanes/new-sign-in")).decisionId).toBe("d3");
+    const full = feed(url, personId);
+    const limited = feed(url, limitedId);
+    await Promise.all([full.ready, limited.ready]);
+    await owner.act({ type: "decisionRight.set", rule: "onlyYouKnow", who: "you" });
+    expect((await delegate.read<LaneView>("/lanes/new-sign-in")).decisionId).toBeNull();
+    await expect.poll(() => full.frames).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "lane.changed", laneId: "new-sign-in" }),
+      expect.objectContaining({ type: "topic.changed", topicId: "web" }),
+    ]));
+    expect(limited.frames.filter(frame => frame.type === "lane.changed" || frame.type === "topic.changed")).toEqual([]);
   });
 });
