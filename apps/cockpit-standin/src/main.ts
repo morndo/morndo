@@ -183,7 +183,11 @@ export async function start(module: Module, port: number, clock?: () => string):
           }
           return { ...effect, events };
         }, saved => world.authorizeReplay(command, saved, viewer));
-        respond(res, 200, definition, result);
+        respond(res, 200, definition, {
+          ...result,
+          message: result.message && world.projectMessage(result.message, viewer),
+          events: result.events.map(event => world.projectEvent(event, viewer)),
+        });
       } else if (method === "post" && route.path === `${BASE}/uploads`) {
         if (viewer.membershipState === "invited") throw new Problem("forbidden", "Accept the invitation before uploading files.");
         const payload = await readJson(req);

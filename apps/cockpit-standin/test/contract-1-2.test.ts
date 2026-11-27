@@ -38,7 +38,7 @@ function feed(url: string, as?: string, after?: number) {
   const query = new URLSearchParams();
   if (as) query.set("as", as);
   if (after !== undefined) query.set("after", String(after));
-  const socket = new WebSocket(url.replace("http", "ws") + `/feed?${query}`);
+  const socket = new WebSocket(url.replace("http", "ws") + `/feed?${query.toString()}`);
   const frames: FeedEvent[] = [];
   socket.on("message", data => {
     const buffer = Array.isArray(data) ? Buffer.concat(data) : Buffer.isBuffer(data) ? data : Buffer.from(data);
@@ -111,8 +111,9 @@ it("C3 and C6 show only the delegate's decisions in the brief and refresh it whe
     const settled = await brief();
     expect(settled.decisions.map(item => item.id)).toEqual(["d3"]);
     expect(settled).toMatchObject({ openCount: 0, minutes: 0 });
-    await owner.act({ type: "decisionRight.set", rule: "onlyYouKnow", who: "you" });
     await expect.poll(briefFrames).toHaveLength(2);
+    await owner.act({ type: "decisionRight.set", rule: "onlyYouKnow", who: "you" });
+    await expect.poll(briefFrames).toHaveLength(3);
     expect(await brief()).toMatchObject({ decisions: [], openCount: 0, minutes: 0 });
     const ownerAfter = await owner.read<BriefView>("/brief");
     expect(ownerAfter.decisions.map(item => item.id)).toEqual(ownerBefore.decisions.map(item => item.id));
@@ -315,7 +316,8 @@ it("Q2 approval history and Undo frames skip an invited stage reader who cannot 
     const action = undo.events.find(event => event.type === "agentAction.changed");
     expect(action).toBeDefined();
     await expect.poll(() => full.frames.some(frame => frame.seq === action?.seq)).toBe(true);
-    await expect.poll(() => stage.frames.some(frame => frame.type === "lane.changed" && frame.laneId === "halden-offer")).toBe(true);
+    const marker = await owner.act({ type: "message.send", threadId: "topic:partnerships", stage: "Offers", text: "The Cypress draft is ready." });
+    await expect.poll(() => stage.frames.some(frame => frame.type === "message.posted" && frame.message.id === marker.message?.id)).toBe(true);
     expect({ rows: await rows(personId), undo: stage.frames.some(frame => frame.seq === action?.seq) })
       .toEqual({ rows: [], undo: false });
   });
@@ -382,7 +384,7 @@ it("Q5 notifies the owner and Billing delegate when a decline or history redo ch
 it("Q7 reflects the Content holder and the actor who declined, even after the right moves", async () => {
   await withCockpit("gtm", async url => {
     const owner = reader(url);
-    const personId = await join(url, "content", "avery-glen@example.test");
+    const personId = await join(url, "content", "Avery Glen");
     const observerId = await join(url, "content", "morgan-flint@example.test");
     const holder = reader(url, personId);
     const observer = reader(url, observerId);

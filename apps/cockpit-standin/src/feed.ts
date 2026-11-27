@@ -22,14 +22,17 @@ export class Feed {
       const reader = delivery.privateTo?.(event);
       return { world, frame, audience: reader ? new Set([reader]) : delivery.audience?.(event) ?? world.readers(event) };
     });
-    const frames = entries.filter(entry => !delivery.caller || this.canRead(entry, delivery.caller)).map(entry => entry.frame);
+    const frames = entries.flatMap(entry => {
+      const frame = delivery.caller ? this.read(entry, delivery.caller) : entry.frame;
+      return frame ? [frame] : [];
+    });
     delivery.beforeSend?.(frames);
     this.seq += entries.length;
     this.buffer.push(...entries);
     if (this.buffer.length > 1000) this.buffer.splice(0, this.buffer.length - 1000);
     for (const entry of entries) {
       for (const [client, subscription] of this.clients) {
-        if (this.visible(entry, subscription)) this.send(client, entry.frame);
+        this.deliver(client, entry, subscription);
       }
     }
     return frames;
@@ -46,7 +49,7 @@ export class Feed {
       return;
     }
     for (const entry of this.buffer) {
-      if (entry.frame.seq > after && this.visible(entry, subscription)) this.send(client, entry.frame);
+      if (entry.frame.seq > after) this.deliver(client, entry, subscription);
     }
   }
 
@@ -75,12 +78,15 @@ export class Feed {
     this.clients.clear();
   }
 
-  private visible(entry: Entry, subscription: Subscription): boolean {
-    return entry.world === subscription.world() && this.canRead(entry, subscription.viewer());
+  private deliver(client: WebSocket, entry: Entry, subscription: Subscription): void {
+    if (entry.world !== subscription.world()) return;
+    const frame = this.read(entry, subscription.viewer());
+    if (frame) this.send(client, frame);
   }
 
-  private canRead(entry: Entry, id: string): boolean {
-    return entry.audience.has(id) && entry.world.canReceive(entry.frame, id);
+  private read(entry: Entry, id: string): FeedEvent | undefined {
+    if (!entry.audience.has(id) || !entry.world.canReceive(entry.frame, id)) return undefined;
+    return entry.world.projectEvent(entry.frame, entry.world.viewer(id));
   }
 
   private frame(event: Event, at: string, seq: number): FeedEvent {
