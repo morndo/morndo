@@ -1,6 +1,6 @@
 import { once } from "node:events";
 import type {
-  BriefView, Command, CommandResult, DecisionQueueView, DecisionView, FeedEvent, LaneView, SidebarView, ThreadView, TopicView,
+  BriefView, Command, CommandResult, DecisionQueueView, DecisionView, FeedEvent, LaneView, MembersView, SidebarView, ThreadView, TopicView,
 } from "@morndo/cockpit-api";
 import { expect, it } from "vitest";
 import { WebSocket } from "ws";
@@ -64,6 +64,48 @@ it("C2 gives the owner the right on a settled dev decision in all three views", 
     expect(view).toMatchObject({ state: "declined", canDecide: true });
     expect(queue.items.find(item => item.id === "d3")).toMatchObject({ canDecide: true });
     expect(brief.decisions.find(item => item.id === "d3")).toMatchObject({ canDecide: true });
+  });
+});
+
+it("C3 and C6 show only the delegate's decisions in the brief and refresh it when a right changes", async () => {
+  await withCockpit("dev", async url => {
+    const owner = reader(url);
+    const nameOrEmail = "riley@example.test";
+    await owner.act({ type: "access.invite", topicId: "web", nameOrEmail });
+    const invitation = (await owner.read<MembersView>("/members")).invitations.find(item => item.nameOrEmail === nameOrEmail);
+    if (!invitation) throw new Error("Missing invitation for the test reader");
+    const { id: invitationId, personId } = invitation;
+    const delegate = reader(url, personId);
+    await delegate.act({ type: "access.accept", invitationId });
+    await owner.act(grant("web", personId));
+    await owner.act(grant("billing", personId));
+    const ownerBefore = await owner.read<BriefView>("/brief");
+    const brief = () => delegate.read<BriefView>("/brief");
+    expect((await delegate.read<DecisionQueueView>("/decisions")).items).toEqual([
+      expect.objectContaining({ id: "d2", canDecide: false }),
+      expect.objectContaining({ id: "d3", canDecide: false }),
+    ]);
+    expect(await brief()).toMatchObject({ decisions: [], openCount: 0, minutes: 0 });
+
+    const { frames, ready } = feed(url, personId);
+    await ready;
+    const briefFrames = () => frames.filter(frame => frame.type === "brief.changed");
+    await owner.act({ type: "decisionRight.set", rule: "onlyYouKnow", who: "agent", personId, dailyLimit: 5 });
+    await expect.poll(briefFrames).toHaveLength(1);
+    const assigned = await brief();
+    expect(assigned.decisions.map(item => item.id)).toEqual(["d3"]);
+    expect(assigned).toMatchObject({ openCount: 1, minutes: 3 });
+    await delegate.act({ type: "decision.decline", decisionId: "d3" });
+    const settled = await brief();
+    expect(settled.decisions.map(item => item.id)).toEqual(["d3"]);
+    expect(settled).toMatchObject({ openCount: 0, minutes: 0 });
+    await owner.act({ type: "decisionRight.set", rule: "onlyYouKnow", who: "you" });
+    await expect.poll(briefFrames).toHaveLength(2);
+    expect(await brief()).toMatchObject({ decisions: [], openCount: 0, minutes: 0 });
+    const ownerAfter = await owner.read<BriefView>("/brief");
+    expect(ownerAfter.decisions.map(item => item.id)).toEqual(ownerBefore.decisions.map(item => item.id));
+    expect(ownerAfter.openCount).toBe(ownerBefore.openCount - 1);
+    expect(ownerAfter.minutes).toBe(ownerBefore.minutes - 3);
   });
 });
 
@@ -189,5 +231,19 @@ it("R5 keeps a goal-only ask in Research chat without proposing a decision or fi
       const thread = await owner.read<ThreadView>("/threads/topic:research");
       expect(thread.messages.some(message => message.id === result.message?.id && message.text === text)).toBe(true);
     }
+  });
+});
+
+it("R3 includes a shared-resource topic outside the ranks Research passes", async () => {
+  await withCockpit("gtm", async url => {
+    const owner = reader(url);
+    const text = "Raise Research priority by one";
+    const before = await proposal(owner, "outbound", text);
+    expect(before.goalChange?.affectedTopics).toEqual(["seo"]);
+
+    await owner.act({ type: "lane.move", laneId: "click-floor", topicId: "research" });
+    const linked = await proposal(owner, "outbound", text);
+    expect(linked.goalChange).toMatchObject({ priority: { from: 6, to: 5 }, previousUnit: null });
+    expect(linked.goalChange?.affectedTopics.toSorted()).toEqual(["paid", "seo"]);
   });
 });
