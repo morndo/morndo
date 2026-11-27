@@ -1588,6 +1588,8 @@ export class World {
     const grant = { kind, stages: [...new Set(stages)] };
     const current = this.accessEntry(id, person);
     const hadAccess = current && current.access.kind !== "none";
+    const holders = [...this.decisions.values()].filter(decision => decision.topicId === id)
+      .map(decision => ({ decision, holderId: this.decisionHolder(decision).id }));
     if (current) current.access = grant;
     else access.people.push({ person, access: grant, owner: false, scope: "", otherTopics: [] });
     for (const stage of topic.stages) {
@@ -1597,6 +1599,9 @@ export class World {
       .map(view => ({ type: "access.changed", topicId: view.topicId }));
     events.push({ type: "access.changed", topicId: id, ...(hadAccess || kind !== "none" ? { personId } : {}) });
     events.push({ type: "topic.changed", topicId: id }, { type: "members.changed", personId });
+    for (const { decision, holderId } of holders) {
+      if (this.decisionHolder(decision).id !== holderId) events.push(...this.decisionWorkEvents(decision));
+    }
     return done(events);
   }
 
@@ -2661,6 +2666,13 @@ export class World {
     return [...this.lanes.values()].filter(lane => lane.decisionId === decisionId && !this.removed.has(lane.id));
   }
 
+  private decisionWorkEvents(decision: DecisionView): Event[] {
+    return [
+      { type: "decision.changed", decisionId: decision.id, state: decision.state },
+      ...this.decisionLanes(decision.id).map(lane => ({ type: "lane.changed" as const, laneId: lane.id })),
+    ];
+  }
+
   private decisionEvents(decision: DecisionView): Event[] {
     const events: Event[] = [
       { type: "decision.changed", decisionId: decision.id, state: decision.state },
@@ -3031,7 +3043,7 @@ export class World {
     const detail = this.goalChangeDetail(goalChange);
     const decision = {
       id, title: text, shortTitle: `Change the ${topic.name} ${field}`, state: "open", topicId: topic.id, topicName: topic.name,
-      dueAt: this.nextBrief(3), whyYours: goal ? "Yours: changes a goal" : `${this.owner.shortName} decides: changes the ${field}`,
+      dueAt: this.nextBrief(3), whyYours: goal ? "Yours: changes a goal" : `Yours: changes the ${field}`,
       minutes: 2, contextLine: topic.name, cardContext: detail,
       doneNote: `Approved. The ${field} is changed on record.`, laneId: null, approveLabel: "Approve", canDecide: true,
       provenance: null, context: detail, numbers: [], proof: null, opportunity: null, risk: null, suggestion: null,
@@ -3269,24 +3281,26 @@ export class World {
   }
 
   /** Take a before-image of shared projections so timing alone cannot expose private work. */
-  notificationAudience(decisionRule?: string): (event: Event) => Set<string> {
+  notificationAudience(command?: Command): (event: Event) => Set<string> {
     const snapshots = new Map<string, Map<string, string>>();
     const sharedEvents: Event[] = [
       ...[...this.topics.keys()].map(topicId => ({ type: "topic.changed", topicId } as const)),
       ...[...this.threads.keys()].map(threadId => ({ type: "thread.changed", threadId } as const)),
       { type: "brief.changed" },
     ];
-    if (decisionRule) {
+    const rightChange = command?.type === "decisionRight.set";
+    const accessChange = command?.type === "access.set";
+    if (rightChange || accessChange) {
       for (const decision of this.decisions.values()) {
-        if (decision.rule !== decisionRule) continue;
-        sharedEvents.push({ type: "decision.changed", decisionId: decision.id, state: decision.state });
-        for (const lane of this.decisionLanes(decision.id)) sharedEvents.push({ type: "lane.changed", laneId: lane.id });
+        const affected = rightChange ? decision.rule === command.rule : decision.topicId === command.topicId;
+        if (affected) sharedEvents.push(...this.decisionWorkEvents(decision));
       }
     }
-    const rightWorkEvent = (event: Event) => Boolean(decisionRule && (event.type === "lane.changed" || event.type === "topic.changed"));
+    const compareOwner = (event: Event) => (rightChange && (event.type === "lane.changed" || event.type === "topic.changed"))
+      || (accessChange && (event.type === "lane.changed" || event.type === "decision.changed"));
     for (const reader of this.people.values()) {
       snapshots.set(reader.id, new Map(sharedEvents.flatMap(event => {
-        if (reader.id === this.owner.id && !rightWorkEvent(event)) return [];
+        if (reader.id === this.owner.id && !compareOwner(event)) return [];
         const key = this.notificationRecord(event, reader);
         return key === undefined ? [] : [[JSON.stringify(event), key]];
       })));
@@ -3294,11 +3308,11 @@ export class World {
     return event => {
       const audience = this.readers(event);
       if (event.type !== "topic.changed" && event.type !== "thread.changed" && event.type !== "brief.changed"
-        && !(decisionRule && (event.type === "decision.changed" || event.type === "lane.changed"))) return audience;
+        && !((rightChange || accessChange) && (event.type === "decision.changed" || event.type === "lane.changed"))) return audience;
       const key = JSON.stringify(event);
       for (const id of audience) {
         const reader = this.people.get(id);
-        if (!reader || (reader.id === this.owner.id && !rightWorkEvent(event))) continue;
+        if (!reader || (reader.id === this.owner.id && !compareOwner(event))) continue;
         if (snapshots.get(id)?.get(key) === this.notificationRecord(event, reader)) audience.delete(id);
       }
       return audience;
