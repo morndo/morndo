@@ -230,10 +230,14 @@ async function shapesAgree(url: string, as: string | undefined, label: string) {
     if (!s.laneId) continue;
     const lane = await get(url, `/lanes/${s.laneId}`, as);
     if (lane.status !== 200) continue;
-    const offers = lane.body?.decisionId === s.id && lane.body?.approveLabel !== null;
-    if (s.state === "open" && offers !== (s.view === true)) laneBad.push(`${s.id}: canDecide ${short(s.view)}, lane offers Approve ${String(offers)}`);
+    // the lane offers the act as the design draws it (some lanes only open the decision); a reader who may not decide
+    // is offered nothing, and a reader who may is still led to the decision
+    const offers = lane.body?.approveLabel != null || ((lane.body?.acts ?? []) as any[]).some(a => a?.id === "approve" || a?.id === "undo" || a?.target?.kind === "decision");
+    const linked = lane.body?.decisionId === s.id;
+    if (s.state === "open" && s.view !== true && (offers || linked)) laneBad.push(`${s.id}: canDecide ${short(s.view)}, the lane still offers it (label ${short(lane.body?.approveLabel)}, linked ${String(linked)})`);
+    if (s.view === true && !linked) laneBad.push(`${s.id}: canDecide true, the lane does not name the decision`);
   }
-  ok(laneBad.length === 0, `C3 ${label}: a decision's lane offers Approve exactly when canDecide is true (${laneBad.slice(0, 3).join("; ")})`);
+  ok(laneBad.length === 0, `C3 ${label}: a reader who may not decide is offered nothing on the decision's lane; one who may is led to it (${laneBad.slice(0, 3).join("; ")})`);
   return seen;
 }
 
