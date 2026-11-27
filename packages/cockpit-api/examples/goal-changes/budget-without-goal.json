@@ -1,0 +1,18 @@
+{
+  "topicId": "fieldwork",
+  "field": "budget",
+  "from": 3500,
+  "to": 4275,
+  "deadlineAt": null,
+  "previousDeadlineAt": null,
+  "unit": null,
+  "previousUnit": null,
+  "affectedTopics": [],
+  "budget": {
+    "from": { "amountMinor": 3500, "currency": "EUR" },
+    "to": { "amountMinor": 4275, "currency": "EUR" },
+    "period": "week"
+  },
+  "priority": null,
+  "guardrail": null
+}

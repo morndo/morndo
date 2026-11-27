@@ -361,7 +361,8 @@ const SHAPES: Shape[] = [
   { field: "target", pat: [...LEAD, NOUN_GOAL, alt("for", "of"), T, intro(), amountSlot("amount"), ...AFTER_NUMBER] },
   { field: "target", pat: [opt("please"), opt(alt("a", "an")), NOUN_GOAL, "of", amountSlot("amount"), opt(spanSlot("unit")), "for", T, TAIL] },
   { field: "target", relative: true, pat: [PRE_RELATIVE, DET, opt(T), NOUN_GOAL, "by", amountSlot("amount"), opt(spanSlot("unit")), TAIL] },
-  { field: "unit", pat: [...LEAD, opt(T), opt(NOUN_GOAL), "unit", intro(), spanSlot("unit", 4), TAIL] },
+  { field: "unit", pat: [opt("please"), alt("set", "change", "make", "update", "adjust"), DET, opt(T), opt(NOUN_GOAL),
+    "unit", opt(["of", "measure"]), intro("be"), spanSlot("unit", 4), TAIL] },
   // deadline
   { field: "deadline", pat: [...MOVE, opt(T), DEADLINE_NOUN, opt("back"), intro("until"), dateSlot, TAIL] },
   { field: "deadline", pat: [...MOVE, DEADLINE_NOUN, alt("for", "of"), T, intro("until"), dateSlot, TAIL] },
@@ -482,7 +483,7 @@ function build(field: GoalAsk["field"], relative: boolean, env: Env, cx: Cx): Go
   if (field === "guardrail") return buildGuardrail(relative, env, cx);
   const topic = topicOf(cx, env.topic);
   const amount: Amount | undefined = env.amount;
-  if (!topic?.goal) return null;
+  if (!topic) return null;
   const goal = topic.goal;
   if (field === "budget") {
     const cap = topic.cap;
@@ -497,6 +498,7 @@ function build(field: GoalAsk["field"], relative: boolean, env: Env, cx: Cx): Go
     return { ...BLANK, topicId: topic.id, field, from: cap.amountMinor, to: minor, budget: { from: { ...cap }, to, period: env.period ?? null } };
   }
   if (field === "target" || field === "unit") {
+    if (!goal) return null;
     const current = goal.target;
     let to = current;
     let unit: string | null = null;
@@ -526,6 +528,7 @@ function build(field: GoalAsk["field"], relative: boolean, env: Env, cx: Cx): Go
     return { ...BLANK, topicId: topic.id, field: kind, from: current, to, deadlineAt, unit };
   }
   if (field === "deadline") {
+    if (!goal) return null;
     const deadlineAt = env.date ? deadlineFor(env.date as DateSpec, cx.now) : null;
     if (!deadlineAt) return null;
     if (goal.deadlineAt && berlinDay(goal.deadlineAt) === berlinDay(deadlineAt)) return null;
@@ -544,7 +547,7 @@ function build(field: GoalAsk["field"], relative: boolean, env: Env, cx: Cx): Go
       const close = from < other.rank ? other.rank - 1 : other.rank;
       to = above ? close : close + 1;
     } else if (relative) to = from - sign;
-    if (to === undefined || to < 1 || to > cx.ranked) return null;
+    if (to === undefined || to < 1 || to > cx.ranked || (!goal && to === from)) return null;
     if ((dir === "down" && to <= from) || (dir === "up" && to > from)) return null;
     return { ...BLANK, topicId: topic.id, field, from, to, priority: { from, to } };
   }
@@ -556,9 +559,14 @@ function build(field: GoalAsk["field"], relative: boolean, env: Env, cx: Cx): Go
  * not in it does not exist for this sentence. `ranked` is how many topics hold a priority rank.
  */
 export function readGoalAsk(text: string, topics: readonly TopicFact[], chatTopicId: string | null, now: string, ranked: number): GoalAsk | null {
+  return readGoalRequest(text, topics, chatTopicId, now, ranked).ask;
+}
+
+export function readGoalRequest(text: string, topics: readonly TopicFact[], chatTopicId: string | null, now: string, ranked: number) {
+  const empty = { ask: null, unitChange: false, noGoalTopicId: null };
   const tokens = tokenize(text);
-  if (tokens.length === 0 || tokens.length > 40) return null;
-  if (tokens.some((token, n) => (token.k === "w" && NOT.has(token.s)) || (token.k === "w" && token.s === "no" && !(tokens[n + 1]?.s === "more" && tokens[n + 2]?.s === "than")) || (token.k === "p" && (token.s === "?" || token.s === ";")))) return null;
+  if (tokens.length === 0 || tokens.length > 40) return empty;
+  if (tokens.some((token, n) => (token.k === "w" && NOT.has(token.s)) || (token.k === "w" && token.s === "no" && !(tokens[n + 1]?.s === "more" && tokens[n + 2]?.s === "than")) || (token.k === "p" && (token.s === "?" || token.s === ";")))) return empty;
   const cx: Cx = {
     topics: topics.map(topic => ({
       ...topic, words: tokenize(topic.name).filter(token => token.k === "w"),
@@ -567,12 +575,23 @@ export function readGoalAsk(text: string, topics: readonly TopicFact[], chatTopi
     chat: chatTopicId, now: Date.parse(now), ranked,
   };
   const found = new Map<string, GoalAsk>();
+  const withoutGoal = new Set<string>();
+  let unitChange = false;
   for (const shape of SHAPES) {
     for (const state of walk(shape.pat, tokens, { i: 0, env: {} }, cx)) {
       if (state.i !== tokens.length) continue;
+      if (shape.field === "unit") unitChange = true;
+      if (shape.field === "target" || shape.field === "deadline" || shape.field === "unit") {
+        const topic = topicOf(cx, state.env.topic);
+        if (topic && !topic.goal) withoutGoal.add(topic.id);
+      }
       const ask = build(shape.field, shape.relative === true, state.env, cx);
       if (ask) found.set(JSON.stringify(ask), ask);
     }
   }
-  return found.size === 1 ? [...found.values()][0] ?? null : null;
+  return {
+    ask: found.size === 1 ? [...found.values()][0] ?? null : null,
+    unitChange,
+    noGoalTopicId: withoutGoal.size === 1 ? [...withoutGoal][0] ?? null : null,
+  };
 }

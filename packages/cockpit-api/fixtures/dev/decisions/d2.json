@@ -2,6 +2,7 @@
   "id": "d2",
   "title": "Run the tax-rate migration on the production database",
   "state": "open",
+  "canDecide": true,
   "topicId": "billing",
   "topicName": "Billing",
   "whyYours": null,

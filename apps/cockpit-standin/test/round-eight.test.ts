@@ -123,12 +123,12 @@ describe("a goal word in a module without goals", () => {
 });
 
 describe("priority ranks", () => {
-  it("count only topics that hold a goal, and stay 1..n among them", () => {
+  it("count topics that hold a goal or a cap, and stay 1..n among them", () => {
     const world = asAny(new World("gtm"));
     world.topics.get("research").meta = { askedBy: "x", ownerLine: "x", parts: [], nextReportAt: null, nextReportId: null, priority: null };
     const ranks = [...world.priorityRanks().entries()] as [string, number][];
-    expect(ranks.map(([id]) => id).sort()).toEqual(["content", "outbound", "paid", "partnerships", "seo"]);
-    expect(ranks.map(([, rank]) => rank).sort((a, b) => a - b)).toEqual([1, 2, 3, 4, 5]);
+    expect(ranks.map(([id]) => id).sort()).toEqual(["content", "outbound", "paid", "partnerships", "research", "seo"]);
+    expect(ranks.map(([, rank]) => rank).sort((a, b) => a - b)).toEqual([1, 2, 3, 4, 5, 6]);
     const dev = asAny(new World("dev"));
     for (const topic of dev.topics.values()) topic.meta = { askedBy: "x", ownerLine: "x", parts: [], nextReportAt: null, nextReportId: null, priority: null };
     expect(dev.priorityRanks().size).toBe(0);

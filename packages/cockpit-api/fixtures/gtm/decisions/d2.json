@@ -2,6 +2,7 @@
   "id": "d2",
   "title": "Start sequence B for 180 fintech ops leads",
   "state": "open",
+  "canDecide": true,
   "topicId": "outbound",
   "topicName": "Outbound",
   "whyYours": "Yours: in your name",

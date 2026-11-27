@@ -57,7 +57,8 @@ pub struct TopicMeta {
     pub parts: Vec<String>,
     /// Report that is due next, or null when none is scheduled.
     pub next_report_id: Present<crate::ReportId>,
-    /// Rank among the topics of the module (1 is first), or null when the topic has none.
+    /// Rank among the module's topics with a goal or a spend cap (1 is first). Null when the topic
+    /// has neither or when the reader lacks full topic access.
     pub priority: Present<i64>,
 }
 

@@ -2,6 +2,7 @@
   "items": [
     {
       "id": "d1",
+      "canDecide": true,
       "title": "Release the fix for exports that time out",
       "state": "open",
       "topicName": "API",
@@ -14,6 +15,7 @@
     },
     {
       "id": "d2",
+      "canDecide": true,
       "title": "Run the tax-rate migration on the production database",
       "state": "open",
       "topicName": "Billing",
@@ -26,6 +28,7 @@
     },
     {
       "id": "d3",
+      "canDecide": true,
       "title": "Choose the new sign-in: passkeys or a link by email",
       "state": "open",
       "topicName": "Web app",

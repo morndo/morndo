@@ -63,6 +63,7 @@
   "decisions": [
     {
       "id": "d1",
+      "canDecide": true,
       "topicId": "api",
       "topicName": "API",
       "whyYours": "",
@@ -78,6 +79,7 @@
     },
     {
       "id": "d2",
+      "canDecide": true,
       "topicId": "billing",
       "topicName": "Billing",
       "whyYours": "",
@@ -93,6 +95,7 @@
     },
     {
       "id": "d3",
+      "canDecide": true,
       "topicId": "web",
       "topicName": "Web app",
       "whyYours": "",

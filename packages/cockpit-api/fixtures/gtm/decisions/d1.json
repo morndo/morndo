@@ -2,6 +2,7 @@
   "id": "d1",
   "title": "Move €1,200 a week from LinkedIn to Google Search",
   "state": "open",
+  "canDecide": true,
   "topicId": "paid",
   "topicName": "Paid",
   "whyYours": "Yours: over €500",

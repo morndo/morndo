@@ -35,7 +35,9 @@ const COMPAT = "packages/cockpit-api/scripts/compat.ts";
 const STANDIN = "apps/cockpit-standin/src/main.ts";
 const FIXTURES = "packages/cockpit-api/fixtures";
 const BASE = "/api/cockpit";
-const VERSION = "1.1.0";
+// 1.1.0 or a later 1.x minor: a later contract keeps every promise this one checks (amended for 1.2.0, cockpit-contract-1-2)
+const VERSION_OK = (v: unknown) => typeof v === "string" && /^1\.([1-9]\d*)\.\d+$/.test(v);
+const VERSION = "1.1.0 or later";
 const HEADER_PATTERN = "^1\\.[0-9]+\\.[0-9]+$";
 const IDS = ["P1", "P2", "P3", "P4", "G1", "G2", "G3", "G4", "G5", "R1", "R2", "R3", "R4", "R5", "R6", "R7", "R8",
   "L1", "L2", "L3", "L4", "L5", "L6", "L7", "L8", "E1", "E2", "E3", "E4", "E5", "E6", "E7",
@@ -66,8 +68,8 @@ if (!existsSync(SCHEMA)) fatal(`P1 no exported schema at ${SCHEMA}`);
 const schema: any = JSON.parse(readFileSync(SCHEMA, "utf8"));
 const openapi: any = existsSync(OPENAPI) ? JSON.parse(readFileSync(OPENAPI, "utf8")) : {};
 const defs: Record<string, any> = schema.$defs ?? {};
-ok(schema["x-contract-version"] === VERSION, `P1 the schema's x-contract-version is ${VERSION} (got ${schema["x-contract-version"]})`);
-ok(openapi.info?.version === VERSION, `P1 the OpenAPI info.version is ${VERSION} (got ${openapi.info?.version})`);
+ok(VERSION_OK(schema["x-contract-version"]), `P1 the schema's x-contract-version is ${VERSION} (got ${schema["x-contract-version"]})`);
+ok(VERSION_OK(openapi.info?.version), `P1 the OpenAPI info.version is ${VERSION} (got ${openapi.info?.version})`);
 ok(schema.$id === "urn:morndo:cockpit-api:1", `P1 the schema $id stays urn:morndo:cockpit-api:1 (got ${schema.$id})`);
 
 // P2: every response header cockpit-contract is a 1.x.y pattern, not a const
@@ -525,8 +527,8 @@ async function scenario(name: string, module: Module, fn: (url: string) => Promi
 // ---- gtm, read-only: the views, records and fixtures as they start
 async function gtmReads(url: string) {
   const w = await get(url, "/workspace");
-  ok(w.headers.get("cockpit-contract") === VERSION, `P1 gtm responses carry cockpit-contract: ${VERSION} (got ${w.headers.get("cockpit-contract")})`);
-  ok(w.body?.contractVersion === VERSION, `P1 the gtm workspace names contract ${VERSION} (got ${w.body?.contractVersion})`);
+  ok(VERSION_OK(w.headers.get("cockpit-contract")), `P1 gtm responses carry cockpit-contract: ${VERSION} (got ${w.headers.get("cockpit-contract")})`);
+  ok(VERSION_OK(w.body?.contractVersion), `P1 the gtm workspace names contract ${VERSION} (got ${w.body?.contractVersion})`);
   const tz: string = w.body?.timezone ?? "Europe/Berlin";
   const owner: string = w.body?.me?.id;
   const brief = await view("E4", url, "/brief", "BriefView");
@@ -682,7 +684,7 @@ async function madeAndLeads(module: Module, url: string, owner: string) {
 // ---- dev, read-only
 async function devReads(url: string) {
   const w = await get(url, "/workspace");
-  ok(w.headers.get("cockpit-contract") === VERSION && w.body?.contractVersion === VERSION, `P1 the dev workspace names contract ${VERSION}`);
+  ok(VERSION_OK(w.headers.get("cockpit-contract")) && VERSION_OK(w.body?.contractVersion), `P1 the dev workspace names contract ${VERSION}`);
   const owner: string = w.body?.me?.id;
   const brief = await view("E4", url, "/brief", "BriefView");
   const settings = await view("E4", url, "/settings", "SettingsView");

@@ -68,11 +68,11 @@ describe("the goal ask grammar", () => {
     ]) expect([text, read(text)]).toEqual([text, null]);
   });
 
-  it("never names a topic the reader cannot see, and never a topic without a goal", () => {
+  it("uses only readable topics and allows budget and priority changes on capped topics without a goal", () => {
     expect(read("Set the Beacon budget to €60 a week", "atlas", FACTS.filter(topic => topic.id !== "beacon"))).toBeNull();
     expect(read("Make Beacon the top priority", "atlas", FACTS.filter(topic => topic.id !== "beacon"))).toBeNull();
-    expect(read("Set the Cobalt budget to €60 a week")).toBeNull();
-    expect(read("Make Cobalt the top priority")).toBeNull();
+    expect(brief(read("Set the Cobalt budget to €60 a week"))).toEqual(["budget", "cobalt", 6000, null, null]);
+    expect(brief(read("Make Cobalt the top priority"))).toEqual(["priority", "cobalt", 1, null, null]);
     expect(read("Set the target to 12", "cobalt")).toBeNull();
     expect(brief(read("Set the target to 12", "beacon"))).toEqual(["target", "beacon", 12, null, null]);
   });
@@ -108,7 +108,7 @@ describe("the goal ask grammar", () => {
     expect(brief(read("Set the Beacon priority to number 1"))?.[2]).toBe(1);
     expect(brief(read("Raise the priority of Beacon"))?.[2]).toBe(1);
     expect(brief(read("Lower the priority of Atlas"))?.[2]).toBe(2);
-    expect(brief(read("Prioritise Cobalt over Atlas"))).toBeNull();
+    expect(brief(read("Prioritise Cobalt over Atlas"))).toEqual(["priority", "cobalt", 1, null, null]);
     expect(read("Make Beacon priority number 7")).toBeNull();
     expect(read("Raise the priority of Atlas")).toBeNull();
     expect(read("Move Beacon up two places in priority")).toBeNull();
@@ -157,9 +157,9 @@ describe("what the stand-in does with a proposal", () => {
     const [content, outbound] = [propose("content", "Make Content the top priority"), propose("outbound", "Make Outbound the top priority")];
     act({ type: "decision.approve", decisionId: outbound });
     act({ type: "decision.approve", decisionId: content });
-    const ranks = ["content", "outbound", "partnerships", "paid", "seo"].map(id => read("TopicView", id).meta.priority);
+    const ranks = ["content", "outbound", "partnerships", "paid", "seo", "research"].map(id => read("TopicView", id).meta.priority);
     expect(ranks.slice(0, 2)).toEqual([1, 2]);
-    expect([...ranks].sort((left, right) => left - right)).toEqual([1, 2, 3, 4, 5]);
+    expect([...ranks].sort((left, right) => left - right)).toEqual([1, 2, 3, 4, 5, 6]);
   });
 
   it("computes a guardrail's state in one place, also for a limit of 0, and says when a command breaches it", () => {
