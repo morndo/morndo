@@ -163,10 +163,11 @@ export async function start(module: Module, port: number, clock?: () => string):
           if ("attachment" in command && command.attachment) {
             uploads.requireAttachment(command.attachment.url, viewer.id, viewer.id === world.owner.id);
           }
-          const audience = world.notificationAudience();
+          const audience = world.notificationAudience(command.type === "decisionRight.set" ? command.rule : undefined);
           const effect = world.act(command, viewer);
-          const settings = command.type.startsWith("pin.") || command.type === "prefs.set" || command.type === "topic.seen" || command.type === "since.edit" || command.type === "decisionRight.set";
-          const privateTo = (event: (typeof effect.events)[number]) => settings || event.type === "drafts.changed" ? viewer.id : undefined;
+          const settings = command.type.startsWith("pin.") || command.type === "prefs.set" || command.type === "topic.seen" || command.type === "since.edit";
+          const privateTo = (event: (typeof effect.events)[number]) =>
+            settings || event.type === "drafts.changed" || (command.type === "decisionRight.set" && event.type === "prefs.changed") ? viewer.id : undefined;
           const events = feed.publish(world, effect.events, now(), {
             caller: viewer.id,
             audience,

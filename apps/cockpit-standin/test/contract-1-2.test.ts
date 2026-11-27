@@ -37,7 +37,10 @@ function reader(url: string, as?: string) {
 function feed(url: string, as: string) {
   const socket = new WebSocket(url.replace("http", "ws") + `/feed?as=${as}`);
   const frames: FeedEvent[] = [];
-  socket.on("message", data => frames.push(JSON.parse(data.toString()) as FeedEvent));
+  socket.on("message", data => {
+    const buffer = Array.isArray(data) ? Buffer.concat(data) : Buffer.isBuffer(data) ? data : Buffer.from(data);
+    frames.push(JSON.parse(buffer.toString("utf8")) as FeedEvent);
+  });
   return { frames, ready: once(socket, "open") };
 }
 
@@ -90,7 +93,8 @@ it("C5 keeps a cap change with the owner and withdraws a delegated Content decis
     await owner.act({ type: "decisionRight.set", rule: "inYourName", who: "agent", personId: "lea-brandt", dailyLimit: 5 });
     expect(await delegate.read<DecisionView>("/decisions/d3")).toMatchObject({ canDecide: true });
     const change = await proposal(owner, "content", "Set the Content budget cap to €41.50 each week");
-    await owner.act({ type: "decisionRight.set", rule: change.rule ?? "", who: "agent", personId: "lea-brandt", dailyLimit: 5 });
+    if (!change.rule) throw new Error("The budget proposal has no decision rule");
+    await owner.act({ type: "decisionRight.set", rule: change.rule, who: "agent", personId: "lea-brandt", dailyLimit: 5 });
     expect(await delegate.read<DecisionView>(`/decisions/${change.id}`)).toMatchObject({ canDecide: false });
     await delegate.act({ type: "decision.decline", decisionId: change.id }, 403);
     await owner.act(grant("content", "lea-brandt", "view"));
