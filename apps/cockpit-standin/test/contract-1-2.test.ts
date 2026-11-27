@@ -426,3 +426,86 @@ it("Q9 updates the dev sign-in lane and Web topic when Only You Know is handed b
     expect(limited.frames.filter(frame => frame.type === "lane.changed" || frame.type === "topic.changed")).toEqual([]);
   });
 });
+
+it("uses owner wording for a priority proposal on a topic without a goal", async () => {
+  await withCockpit("gtm", async url => {
+    const owner = reader(url);
+    const observerId = await join(url, "research", "Nell Brindle");
+    await owner.act(grant("research", observerId));
+    expect((await owner.read<TopicView>("/topics/research")).goal).toBeNull();
+    const change = await proposal(owner, "content", "Give Research priority 2");
+    const brief = await owner.read<BriefView>("/brief");
+    const observed = await reader(url, observerId).read<DecisionView>(`/decisions/${change.id}`);
+
+    expect(change.goalChange).toMatchObject({ topicId: "research", field: "priority" });
+    expect(observed).toMatchObject({ canDecide: false, whyYours: "Mara decides: changes the priority" });
+    expect.soft(change).toMatchObject({ canDecide: true, whyYours: "Yours: changes the priority" });
+    expect.soft(brief.decisions.find(item => item.id === change.id))
+      .toMatchObject({ canDecide: true, whyYours: "Yours: changes the priority" });
+  });
+});
+
+it.each([
+  { from: "all", to: "view", before: "Kitt", after: "Timo" },
+  { from: "view", to: "all", before: "Timo", after: "Kitt" },
+] as const)("refreshes the sign-in lane and decision for affected readers when access goes from $from to $to", async ({ from, to, before, after }) => {
+  await withCockpit("dev", async url => {
+    const owner = reader(url);
+    const delegateId = await join(url, "web", "Kitt Sedge");
+    const observerId = await join(url, "web", "Clea Fern");
+    const limitedId = await join(url, "web", "Oren Cove");
+    await owner.act(grant("web", delegateId, from));
+    await owner.act(grant("web", observerId));
+    await owner.act({ type: "decisionRight.set", rule: "onlyYouKnow", who: "agent", personId: delegateId, dailyLimit: 5 });
+
+    const observer = reader(url, observerId);
+    const lane = () => observer.read<LaneView>("/lanes/new-sign-in");
+    const decision = () => observer.read<DecisionView>("/decisions/d3");
+    const assertHolder = async (name: string) => {
+      expect(await lane()).toMatchObject({ stateWord: `Waits for ${name}`, standing: { headline: `It waits for ${name}.` } });
+      expect(await decision()).toMatchObject({ canDecide: false, whyYours: `${name} decides.` });
+    };
+    await assertHolder(before);
+    const live = [observerId, delegateId, limitedId].map(id => ({ ...feed(url, id), who: reader(url, id) }));
+    await Promise.all(live.map(item => item.ready));
+    await owner.act(grant("web", delegateId, to));
+    await assertHolder(after);
+
+    // A later personal event confirms each socket has received the full batch it can see.
+    await Promise.all(live.map(async ({ who, frames }) => {
+      const { events } = await who.act({ type: "prefs.set" });
+      const seq = events.find(event => event.type === "prefs.changed")!.seq;
+      await expect.poll(() => frames.some(event => event.seq === seq)).toBe(true);
+    }));
+    const work = (index: number) => live[index]!.frames.filter(event => event.type === "lane.changed" || event.type === "decision.changed");
+    const changed = [
+      expect.objectContaining({ type: "decision.changed", decisionId: "d3" }),
+      expect.objectContaining({ type: "lane.changed", laneId: "new-sign-in" }),
+    ];
+    expect(work(0)).toEqual(expect.arrayContaining(changed));
+    expect(work(1)).toEqual(to === "all" ? expect.arrayContaining(changed) : []);
+    expect(work(2)).toEqual([]);
+  });
+});
+
+it("keeps decision right setting events on the owner's feed when work events reach the delegate", async () => {
+  await withCockpit("dev", async url => {
+    const owner = reader(url);
+    const delegateId = await join(url, "billing", "Uma Fenn");
+    await owner.act(grant("billing", delegateId));
+    const ownerFeed = feed(url);
+    const delegateFeed = feed(url, delegateId);
+    await Promise.all([ownerFeed.ready, delegateFeed.ready]);
+
+    await owner.act({ type: "decisionRight.set", rule: "hardToUndo", who: "agent", personId: delegateId, dailyLimit: 5 });
+    const settingsEvents = (frames: FeedEvent[]) => frames.filter(event => event.type === "prefs.changed" || event.type === "decisionRight.changed")
+      .map(event => event.type).sort();
+    await expect.poll(() => settingsEvents(ownerFeed.frames)).toEqual(["decisionRight.changed", "prefs.changed"]);
+    const { events } = await reader(url, delegateId).act({ type: "prefs.set" });
+    const seq = events.find(event => event.type === "prefs.changed")!.seq;
+    await expect.poll(() => delegateFeed.frames.some(event => event.seq === seq)).toBe(true);
+    const rightChange = delegateFeed.frames.filter(event => event.seq < seq);
+    expect(rightChange).toContainEqual(expect.objectContaining({ type: "decision.changed", decisionId: "d2" }));
+    expect(settingsEvents(rightChange)).toEqual([]);
+  });
+});
