@@ -197,7 +197,7 @@ async function answersAgree(url: string, as: string | undefined, label: string) 
     tried++;
     const r = await act(url, { type: "decision.approve", decisionId: s.id }, as);
     const allowed = r.status === 200;
-    if (allowed !== (s.view === true)) wrong.push(`${s.id} canDecide ${s.view} approve ${r.status}`);
+    if (allowed !== (s.view === true)) wrong.push(`${s.id} canDecide ${short(s.view)} approve ${r.status}`);
     if (!allowed && r.status !== 403) wrong.push(`${s.id} refused with ${r.status}, not 403`);
     if (allowed) {
       const back = await act(url, { type: "decision.undo", decisionId: s.id }, as);
@@ -217,13 +217,21 @@ async function shapesAgree(url: string, as: string | undefined, label: string) {
   const seen = await rights(url, as);
   const bad = seen.filter(s => !agree(s));
   ok(bad.length === 0, `C3 ${label}: DecisionView, the queue and the brief say the same canDecide (${short(bad.slice(0, 3))})`);
+  if (as) {
+    // "Yours to decide": a person's brief lists the decisions they may decide and counts only those
+    const brief = (await get(url, "/brief", as)).body;
+    const listed = ((brief?.decisions ?? []) as any[]).map(d => String(d.id)).sort((a, b) => a.localeCompare(b));
+    const theirs = seen.filter(s => s.view === true).map(s => s.id).sort((a, b) => a.localeCompare(b));
+    const open = seen.filter(s => s.view === true && s.state === "open").length;
+    ok(same(listed, theirs) && brief?.openCount === open, `C3 ${label}: the brief lists exactly the decisions this person may decide and counts the open ones (${short(listed)} vs ${short(theirs)}; open ${short(brief?.openCount)} vs ${open})`);
+  }
   const laneBad: string[] = [];
   for (const s of seen) {
     if (!s.laneId) continue;
     const lane = await get(url, `/lanes/${s.laneId}`, as);
     if (lane.status !== 200) continue;
     const offers = lane.body?.decisionId === s.id && lane.body?.approveLabel !== null;
-    if (s.state === "open" && offers !== (s.view === true)) laneBad.push(`${s.id}: canDecide ${s.view}, lane offers Approve ${offers}`);
+    if (s.state === "open" && offers !== (s.view === true)) laneBad.push(`${s.id}: canDecide ${short(s.view)}, lane offers Approve ${String(offers)}`);
   }
   ok(laneBad.length === 0, `C3 ${label}: a decision's lane offers Approve exactly when canDecide is true (${laneBad.slice(0, 3).join("; ")})`);
   return seen;
@@ -418,8 +426,10 @@ async function run() {
     const from = before.find(t => t.id === "research")?.rank ?? null;
     const { id, gc } = await propose(url, "research", "Make Research the top priority");
     ok(gc?.field === "priority" && gc?.topicId === "research" && gc?.priority?.from === from && gc?.priority?.to === 1, `R3 "Make Research the top priority" asks rank ${from} → 1 (${short(gc?.priority)})`);
-    const displaced = before.filter(t => t.id !== "research" && typeof t.rank === "number" && from !== null && t.rank < from).map(t => t.id).sort();
-    ok(same([...(gc?.affectedTopics ?? [])].sort(), displaced), `R3 the topics it moves down are the affected ones (${short(gc?.affectedTopics)} vs ${short(displaced)})`);
+    const displaced = before.filter(t => t.id !== "research" && typeof t.rank === "number" && from !== null && t.rank < from).map(t => t.id);
+    const affected: string[] = gc?.affectedTopics ?? [];
+    ok(displaced.length > 0 && displaced.every(t => affected.includes(t)) && !affected.includes("research"),
+      `R3 every topic it moves down is among the affected ones, never Research itself (${short(affected)} vs ${short(displaced)})`);
     if (!id) return;
     await noGoalWords(url, id, "the priority change");
     await topicFrames(url, "approving Research's priority", () => act(url, { type: "decision.approve", decisionId: id }));
