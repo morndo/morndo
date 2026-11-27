@@ -1,8 +1,8 @@
 # ADR-0045: The Mac app is SwiftUI and AppKit over a Rust core
 
-- **Status:** Accepted, 2026-11-27. The owner chose the toolkit on 27 November ("I want swift ui with rust core
-  then."), after a comparison of SwiftUI over a Rust core, Tauri 2 and Rust-native toolkits. The points below that go
-  beyond the choice itself are the engineering consequences of it; the build location (Open) is still the owner's.
+- **Status:** Accepted, 2026-11-27. The owner chose SwiftUI over a Rust core on 27 November, after a comparison of
+  SwiftUI over a Rust core, Tauri 2 and Rust-native toolkits. The points below that go beyond the choice itself are the
+  engineering consequences of it.
 - **Settles:** the open item "The Mac app's UI toolkit over the Rust core" of ADR-0044 (decision 2).
 - **Builds on:** ADR-0044 (the cockpit is the product's UI; Rust types are the source of the API; the Mac app is built
   against the stand-in first), the cockpit API contract (`crates/cockpit-api`, 1.2.0).
@@ -50,12 +50,12 @@ a second time. The owner chose SwiftUI.
    the stand-in) sets budgets for cold start, idle and streaming memory, scrolling and terminal throughput, measured with
    Instruments; later slices are held to them.
 
-9. **Where it builds.** The owner, 27 November: "rust i would still like to let it run somewhere offsite but if not
-   possible just do it here on the mac but always cleanup artifacts". Rust that does not need Apple's SDK (the session
-   runtime, the core's own tests) builds and tests off this Mac (the Linux build box and CI). What needs the SDK (the
+9. **Where it builds.** Off the Mac where it can, otherwise here with every build artifact removed (the owner's
+   preference). Rust that does not need Apple's SDK (the session runtime, the core's own tests) builds and tests off
+   this Mac (the Linux build box and CI). What needs the SDK (the
    core for `aarch64-apple-darwin`, the app) builds here into a temporary folder that is deleted after each run, and in
    CI on a macOS runner.
-10. **Identity.** Bundle id `com.morndo.Morndo` (the owner, 27 November: "for bundle id use morndo.com"); macOS 26.0 or
+10. **Identity.** Bundle id `com.morndo.Morndo` (under the owner's domain, morndo.com); macOS 26.0 or
     later; hardened runtime; no App Sandbox (the app runs terminals and talks to local sockets); ad-hoc signing until a
     Developer ID certificate exists.
 11. **How Swift gets the contract types.** The cockpit contract has generic wrappers (`Present<T>`, `Known<T>`) and
@@ -70,7 +70,7 @@ a second time. The owner chose SwiftUI.
   spec, and the contract checks keep both on the same data; a UI promise counts as shipped only when both clients have
   it, or the gap is listed.
 - The app needs a Mac to build: Xcode for Swift, and the Rust core compiled for `aarch64-apple-darwin` with Apple's SDK.
-  This touches the owner's rule that Rust builds never run on the owner's Mac (see Open).
+  Decision 9 keeps that to what needs Apple's SDK, with every artifact removed afterwards.
 - A new crate and an FFI layer: UniFFI versions are pinned, and the generated Swift is checked in CI like `generated.ts`.
 - CI gains a macOS job for the core, the Swift build and the UI tests.
 
@@ -78,4 +78,6 @@ a second time. The owner chose SwiftUI.
 
 - Moving the build Mac from Xcode 26.2 to the current Xcode.
 - Where the Sparkle feed is hosted and how it is signed (with the existing release channel or its own).
-- Running UI tests unattended on this Mac (macOS asks a person to authenticate before UI automation may start).
+
+Settled on 27 November: UI tests run unattended on the build Mac (automation mode without authentication is on), and
+CI's macOS runner turns it on with `automationmodetool` before the UI tests.
