@@ -869,10 +869,10 @@ export class World {
   private brief(viewer: Actor): BriefView {
     const prefs = this.prefsOf(viewer);
     const view = structuredClone(this.briefBase);
-    view.decisions = [...this.decisions.values()].filter(d => this.fullTopic(d.topicId, viewer)).map(d => ({
+    view.decisions = [...this.decisions.values()].filter(d => this.hasDecisionRight(d, viewer)).map(d => ({
       id: d.id, topicId: d.topicId, topicName: d.topicName, title: d.title, dueAt: d.dueAt, whyYours: d.whyYours ?? "",
       context: this.decisionDetail(d, viewer, d.cardContext), minutes: d.minutes, doneNote: d.doneNote, laneId: d.laneId, state: d.state, rule: d.rule, proposer: d.proposer,
-      canDecide: this.hasDecisionRight(d, viewer),
+      canDecide: true,
     }));
     view.openCount = view.decisions.filter(d => d.state === "open").length;
     view.minutes = view.decisions.filter(d => d.state === "open").reduce((total, d) => total + d.minutes, 0);
@@ -2874,7 +2874,8 @@ export class World {
   }
 
   private budgetSentences(goal: TopicView["goal"] | undefined): string[] {
-    return [goal?.outside, goal?.insight, goal?.calibration].filter((line): line is string => Boolean(line)).join(" ").split(/(?<=[.])/);
+    if (!goal) return [];
+    return [goal.outside, goal.insight, goal.calibration].filter((line): line is string => Boolean(line)).join(" ").split(/(?<=[.])/);
   }
 
   private affectedTopicIds(topicId: string): string[] {
@@ -2955,7 +2956,7 @@ export class World {
     const goal = topic.goal;
     const field = goal ? "goal" : ask.field;
     const displaced = ask.priority?.from != null ? this.displacedBy(topic.id, ask.priority.from, ask.priority.to) : [];
-    const affectedTopics = ask.priority && !goal ? displaced : [...new Set([...this.affectedTopicIds(topic.id), ...displaced])];
+    const affectedTopics = [...new Set([...this.affectedTopicIds(topic.id), ...displaced])];
     const goalChange: GoalChange = {
       topicId: topic.id, affectedTopics, deadlineAt: ask.deadlineAt, previousDeadlineAt: goal?.deadlineAt ?? null,
       unit: ask.unit, previousUnit: goal?.unit ?? null, budget: ask.budget, priority: ask.priority, guardrail: ask.guardrail,
