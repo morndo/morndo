@@ -3,7 +3,8 @@
 // 1.1.0 left two UI promises open. A decision did not say whether its reader may decide it, so a person without the
 // right saw Approve and got a 403. And a topic without a goal (Research) could not have its budget or its priority
 // changed, though it has a spend cap and the brief counts it. This check names the fields and drives the stand-in (gtm
-// and dev). Every assertion is labelled with the plan's decision id (P1, C1..C6, R1..R7). It is locked: implementers do
+// and dev). Every assertion is labelled with the plan's decision id (P1, C1..C6, R1..R7, and Q1..Q10 for what QA and the fresh
+// review of round 02 found). It is locked: implementers do
 // not edit it. The last sections draw their inputs per run; a failing run prints its seed and --seed N repeats it.
 //
 // usage: node scripts/cockpit-contract-v4-check.ts [--by-id] [--seed N]     exit 0 when every case passes
@@ -19,7 +20,8 @@ const OPENAPI = "packages/cockpit-api/schema/cockpit.openapi.json";
 const STANDIN = "apps/cockpit-standin/src/main.ts";
 const BASE = "/api/cockpit";
 const VERSION = "1.2.0";
-const IDS = ["P1", "C1", "C2", "C3", "C4", "C5", "C6", "R1", "R2", "R3", "R4", "R5", "R6", "R7"];
+const IDS = ["P1", "C1", "C2", "C3", "C4", "C5", "C6", "R1", "R2", "R3", "R4", "R5", "R6", "R7",
+  "Q1", "Q2", "Q3", "Q4", "Q5", "Q6", "Q7", "Q8", "Q9", "Q10"];
 const PEOPLE = ["lea-brandt", "jonas-falk", "tom-ahrens"];
 const RULES = ["inYourName", "hardToUndo", "onlyYouKnow", "insideGuardrails", "overWeeklyCap"];
 
@@ -157,6 +159,25 @@ async function propose(url: string, threadTopic: string, text: string, as?: stri
   const id = decisionOf(sent);
   return { sent, id, gc: id ? (await get(url, `/decisions/${id}`)).body?.goalChange ?? null : null };
 }
+
+
+async function allPages(url: string, path: string, pick: (body: any) => any[]): Promise<any[]> {
+  const items: any[] = [];
+  let cursor: string | null = null;
+  for (let n = 0; n < 50; n++) {
+    const sep = path.includes("?") ? "&" : "?";
+    const r = await http(url, `${path}${sep}limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`);
+    if (r.status !== 200) break;
+    items.push(...pick(r.body));
+    cursor = typeof r.body?.nextCursor === "string" ? r.body.nextCursor : null;
+    if (!cursor) break;
+  }
+  return items;
+}
+const withAs = (path: string, as?: string) => (as ? `${path}${path.includes("?") ? "&" : "?"}as=${as}` : path);
+const historyRows = (url: string, topicId: string, as?: string) => allPages(url, withAs(`/topics/${topicId}/history`, as),
+  body => (body?.days ?? []).flatMap((d: any) => d.entries ?? []).filter((e: any) => e.kind === "event"));
+const threadMessages = (url: string, threadId: string, as?: string) => allPages(url, withAs(`/threads/${threadId}`, as), body => body?.messages ?? []);
 
 // seeded draws
 const seedArg = process.argv.indexOf("--seed");
@@ -479,6 +500,159 @@ async function run() {
   });
 }
 
+
+// ---- what QA and the fresh review of round 02 found (Q1..Q10)
+async function found() {
+  // Q1: a chat message names a decision only to a reader who may open it
+  await scenario("Q1 decision id in a shared chat", "gtm", async url => {
+    await act(url, { type: "access.set", topicId: "outbound", personId: "jonas-falk", access: { kind: "all", stages: [] } });
+    await act(url, { type: "access.set", topicId: "research", personId: "jonas-falk", access: { kind: "view", stages: [] } });
+    const feed = openFeed(url, "jonas-falk");
+    await feed.opened;
+    const { id } = await propose(url, "outbound", `Give Research a budget of €${rand(21, 60)} each week`);
+    await pause(300);
+    feed.ws.close();
+    ok(Boolean(id) && (await get(url, `/decisions/${id}`, "jonas-falk")).status === 403, "Q1 the Research budget is proposed and Jonas may not open it");
+    const posted = feed.frames.filter(f => f.type === "message.posted" && f.message?.decisionId === id);
+    const kept = (await threadMessages(url, "topic:outbound", "jonas-falk")).filter((m: any) => m.decisionId === id);
+    ok(posted.length === 0 && kept.length === 0, `Q1 Jonas's Outbound chat and feed never name the decision he may not open (${posted.length} frames, ${kept.length} messages)`);
+  });
+
+  // Q2: history and Undo frames of a decision reach only readers who may open it
+  await scenario("Q2 a stage reader and a decision's history", "gtm", async url => {
+    await act(url, { type: "access.set", topicId: "partnerships", personId: "jonas-falk", access: { kind: "stages", stages: ["Offers"] } });
+    await act(url, { type: "access.set", topicId: "partnerships", personId: "tom-ahrens", access: { kind: "all", stages: [] } });
+    const rule = (await get(url, "/decisions/d4")).body?.rule;
+    await act(url, { type: "decisionRight.set", rule, who: "agent", personId: "tom-ahrens", dailyLimit: 20 });
+    const feed = openFeed(url, "jonas-falk");
+    await feed.opened;
+    const declined = await act(url, { type: "decision.decline", decisionId: "d4" }, "tom-ahrens");
+    await act(url, { type: "decision.undo", decisionId: "d4" }, "tom-ahrens");
+    await pause(300);
+    feed.ws.close();
+    ok(declined.status === 200 && (await get(url, "/decisions/d4", "jonas-falk")).status === 403, "Q2 Tom declines d4; Jonas, on the Offers stage only, may not open it");
+    const rows = (await historyRows(url, "partnerships", "jonas-falk")).filter((e: any) => e.decisionId === "d4" || (e.undoable && /declin/i.test(e.text ?? "")));
+    const frames = feed.frames.filter(f => f.type === "agentAction.changed" && /d4/.test(String(f.actionId)));
+    ok(rows.length === 0 && frames.length === 0, `Q2 Jonas's history and feed carry nothing he could act on for d4 (${short(rows.slice(0, 2))}; ${frames.length} frames)`);
+  });
+
+  // Q3: the word "unit" in an ordinary request does not make it a goal change
+  await scenario("Q3 a request that names a unit", "gtm", async url => {
+    const lanes = async () => ((await get(url, "/topics/research")).body?.lanes ?? []).length;
+    const before = await lanes();
+    const text = pick(["Send the sample unit to the Juniper Workshop", "Ship the demo unit to the Corvane office by Friday"]);
+    const r = await act(url, { type: "message.send", threadId: "topic:research", text });
+    ok(r.status === 200 && r.body?.message?.label?.kind !== "goalChange" && (await lanes()) === before + 1, `Q3 "${text}" is filed as work, as in 1.1.0 (${short(r.body?.message?.label)}; lanes ${before} → ${await lanes()})`);
+  });
+
+  // Q4: an open priority change reads the ranks as they are now; an approved one keeps what it moved
+  await scenario("Q4 two priority changes", "gtm", async url => {
+    const research = await propose(url, "research", "Give Research priority 4");
+    const seo = await propose(url, "seo", "Raise the priority of SEO to number 2");
+    if (!research.id || !seo.id) { ok(false, `Q4 both priority asks are proposed (${research.id}, ${seo.id})`); return; }
+    await act(url, { type: "decision.approve", decisionId: seo.id });
+    const now = await topics(url);
+    const from = now.find(t => t.id === "research")?.rank ?? 0;
+    const passes = now.filter(t => t.id !== "research" && typeof t.rank === "number" && t.rank >= 4 && t.rank < from).map(t => t.id);
+    const open = (await get(url, `/decisions/${research.id}`)).body?.goalChange;
+    ok(open?.priority?.from === from && passes.every(t => (open?.affectedTopics ?? []).includes(t)) && !(open?.affectedTopics ?? []).includes("seo"),
+      `Q4 after SEO moved, the open Research change names the topics it passes now (${short(open?.affectedTopics)} vs ${short(passes)}, from ${short(open?.priority?.from)})`);
+    await act(url, { type: "decision.approve", decisionId: research.id });
+    const approved = (await get(url, `/decisions/${research.id}`)).body?.goalChange;
+    ok(passes.every(t => (approved?.affectedTopics ?? []).includes(t)), `Q4 the approved change keeps the topics it moved (${short(approved?.affectedTopics)})`);
+    const applied = await Promise.all(passes.map(async t => ((await get(url, `/topics/${t}`)).body?.appliedGoalChanges ?? []).some((c: any) => c.topicId === "research" && c.field === "priority")));
+    ok(applied.length > 0 && applied.every(Boolean), `Q4 each topic it moved lists the applied Research change (${short(passes)} ${short(applied)})`);
+  });
+
+  // Q5: an approval or an undo that changes a brief announces it
+  await scenario("Q5 brief.changed on a decision", "gtm", async url => {
+    await act(url, { type: "access.set", topicId: "outbound", personId: "lea-brandt", access: { kind: "all", stages: [] } });
+    const rule = (await get(url, "/decisions/d2")).body?.rule;
+    await act(url, { type: "decisionRight.set", rule, who: "agent", personId: "lea-brandt", dailyLimit: 20 });
+    for (const [type, as] of [["decision.approve", "lea-brandt"], ["decision.undo", "lea-brandt"], ["decision.approve", undefined]] as const) {
+      const feeds = [openFeed(url), openFeed(url, "lea-brandt")];
+      await Promise.all(feeds.map(f => f.opened));
+      const r = await act(url, { type, decisionId: "d2" }, as);
+      await pause(300);
+      feeds.forEach(f => f.ws.close());
+      ok(r.status === 200 && feeds.every(f => f.frames.some(x => x.type === "brief.changed")), `Q5 ${type} of d2 by ${as ?? "the owner"}: the owner and Lea hear brief.changed (${r.status}; ${feeds.map(f => f.frames.map(x => x.type).join("/")).join(" | ")})`);
+    }
+  });
+
+  // Q6: once a decision is settled, its lane and topic offer no Approve
+  await scenario("Q6 settled decision labels", "gtm", async url => {
+    const laneId = (await get(url, "/decisions/d2")).body?.laneId;
+    await act(url, { type: "decision.approve", decisionId: "d2" });
+    const lane = (await get(url, `/lanes/${laneId}`)).body;
+    const topic = (await get(url, "/topics/outbound")).body;
+    ok(lane?.approveLabel === null && (topic?.goal?.decision?.approveLabel ?? null) === null && (lane?.acts ?? []).some((a: any) => a.id === "undo"),
+      `Q6 after approval the lane and the topic offer Undo, not Approve (${short([lane?.approveLabel, topic?.goal?.decision?.approveLabel, (lane?.acts ?? []).map((a: any) => a.id)])})`);
+  });
+
+  // Q7: the words a reader reads agree with canDecide
+  await scenario("Q7 words and canDecide", "gtm", async url => {
+    for (const p of ["lea-brandt", "tom-ahrens"]) await act(url, { type: "access.set", topicId: "outbound", personId: p, access: { kind: "all", stages: [] } });
+    const rule = (await get(url, "/decisions/d2")).body?.rule;
+    await act(url, { type: "decisionRight.set", rule, who: "agent", personId: "lea-brandt", dailyLimit: 20 });
+    const laneId = (await get(url, "/decisions/d2")).body?.laneId;
+    const leaLane = (await get(url, `/lanes/${laneId}`, "lea-brandt")).body;
+    ok(/waits for you/i.test(leaLane?.standing?.headline ?? "") && /waits for you/i.test(leaLane?.stateWord ?? "Waits for you"), `Q7 the holder's lane says it waits for her (${short([leaLane?.standing?.headline, leaLane?.stateWord])})`);
+    const tom = (await get(url, "/decisions/d2", "tom-ahrens")).body;
+    ok(tom?.canDecide === false && !/^yours\b/i.test(tom?.whyYours ?? ""), `Q7 a reader who may not decide is not told it is theirs (${short(tom?.whyYours)})`);
+    const lea = (await get(url, "/brief", "lea-brandt")).body;
+    ok(lea?.openCount > 0 && /decision/i.test(lea?.lede ?? ""), `Q7 the holder's brief lede counts her open decisions (${lea?.openCount}: ${short(lea?.lede)})`);
+    await act(url, { type: "decision.decline", decisionId: "d2" }, "lea-brandt");
+    const seen = (await get(url, `/lanes/${laneId}`, "tom-ahrens")).body?.standing;
+    ok(/^Lea\b/.test(seen?.headline ?? "") && !/Mara/.test(`${seen?.headline} ${seen?.detail}`), `Q7 who declined it reads the same in the headline and the detail (${short(seen)})`);
+  });
+
+  // Q8: the Manager names a Research change by its field
+  await scenario("Q8 Manager words for Research", "gtm", async url => {
+    const budget = await propose(url, "research", `Set the Research budget to €${rand(25, 60)} a week`);
+    const rank = await propose(url, "research", "Raise the priority of Research");
+    const words = async () => JSON.stringify([(await get(url, "/manager")).body?.asks, (await get(url, "/manager")).body?.since, (await get(url, "/threads/manager")).body?.since]);
+    const open = await words();
+    ok(Boolean(budget.id && rank.id), "Q8 both Research changes are proposed");
+    const asks = ((await get(url, "/manager")).body?.asks ?? []).filter((a: any) => [budget.id, rank.id].includes(a.target?.id));
+    ok(asks.length === 2 && asks.every((a: any) => !/goal/i.test(a.went ?? "")) && !/Research: a goal change/i.test(open), `Q8 the Manager's asks and since lines name no goal for Research (${short(asks.map((a: any) => a.went))})`);
+    await act(url, { type: "decision.approve", decisionId: budget.id });
+    const done = ((await get(url, "/manager")).body?.asks ?? []).find((a: any) => a.target?.id === budget.id);
+    ok(done && !/goal/i.test(done.went ?? ""), `Q8 after approval it still names no goal (${short(done?.went)})`);
+    const asked = "Set the Research target to 14";
+    await act(url, { type: "message.send", threadId: "topic:research", text: asked });
+    const thread: any[] = await threadMessages(url, "topic:research");
+    const answer = thread.slice(thread.findLastIndex((m: any) => m.text === asked) + 1).at(0);
+    ok(!/as a goal change/i.test(answer?.text ?? ""), `Q8 a target ask on Research is not called a kept goal change (${short(answer?.text)})`);
+  });
+
+  // Q9: handing a right over announces the lane and topic the person reads differently
+  await scenario("Q9 lane and topic frames on a right", "gtm", async url => {
+    await act(url, { type: "access.set", topicId: "partnerships", personId: "jonas-falk", access: { kind: "all", stages: [] } });
+    const d4 = (await get(url, "/decisions/d4")).body;
+    const feed = openFeed(url, "jonas-falk");
+    await feed.opened;
+    await act(url, { type: "decisionRight.set", rule: d4?.rule, who: "agent", personId: "jonas-falk", dailyLimit: 20 });
+    await pause(300);
+    feed.ws.close();
+    ok(feed.frames.some(f => f.type === "lane.changed" && f.laneId === d4?.laneId) && feed.frames.some(f => f.type === "topic.changed" && f.topicId === "partnerships"),
+      `Q9 Jonas hears lane.changed for ${d4?.laneId} and topic.changed for partnerships (${short(feed.frames.map(f => f.type))})`);
+  });
+
+  // Q10: a right handed to a reader without full access changes nothing they read and sends them nothing
+  await scenario("Q10 a right without full access", "gtm", async url => {
+    await act(url, { type: "access.set", topicId: "partnerships", personId: "jonas-falk", access: { kind: pick(["view", "stages"]), stages: ["Offers"] } });
+    const before = JSON.stringify((await get(url, "/brief", "jonas-falk")).body?.decisions);
+    const feed = openFeed(url, "jonas-falk");
+    await feed.opened;
+    await act(url, { type: "decisionRight.set", rule: (await get(url, "/decisions/d4")).body?.rule, who: "agent", personId: "jonas-falk", dailyLimit: 20 });
+    await pause(300);
+    feed.ws.close();
+    const after = JSON.stringify((await get(url, "/brief", "jonas-falk")).body?.decisions);
+    const told = feed.frames.filter(f => f.type === "decision.changed" || f.type === "brief.changed" || f.type === "lane.changed");
+    ok(before === after && told.length === 0, `Q10 the right alone gives Jonas no card and no frame (${short(after)}; ${short(told)})`);
+  });
+}
+
 // ---- drawn inputs: random access, random rights, random goal changes; the three shapes and the answer always agree
 async function drawn() {
   for (let round = 0; round < 4; round++) {
@@ -533,6 +707,7 @@ async function drawn() {
 
 try {
   await run();
+  await found();
   await drawn();
 } catch (e) {
   fatal(String((e as Error)?.message ?? e));
