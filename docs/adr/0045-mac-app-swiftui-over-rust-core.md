@@ -29,7 +29,8 @@ a second time. The owner chose SwiftUI.
 2. **One Rust core, reached through UniFFI.** A crate of its own (`crates/morndo-core`) depends on `crates/cockpit-api`
    and owns networking, the mirror and the terminal model. Swift reaches it through
    [UniFFI](https://github.com/mozilla/uniffi-rs) (0.32.x, proc-macro mode), shipped to Xcode as an XCFramework.
-   Contract types cross as UniFFI records, so the Mac app cannot disagree with the hub or the web.
+   Contract types reach Swift through types generated from the same Rust schema (decision 11), so the Mac app cannot
+   disagree with the hub or the web.
 3. **Swift renders; it does not decide.** The hub computes every view per reader (ADR-0044 decision 3); the core adds
    only caching and the mirror. Swift holds no business rules: who may decide is `canDecide`, health is
    `TopicView.health`, and so on. What is built twice, web and Mac, is the rendering, not the rules.
@@ -49,6 +50,20 @@ a second time. The owner chose SwiftUI.
    the stand-in) sets budgets for cold start, idle and streaming memory, scrolling and terminal throughput, measured with
    Instruments; later slices are held to them.
 
+9. **Where it builds.** The owner, 27 November: "rust i would still like to let it run somewhere offsite but if not
+   possible just do it here on the mac but always cleanup artifacts". Rust that does not need Apple's SDK (the session
+   runtime, the core's own tests) builds and tests off this Mac (the Linux build box and CI). What needs the SDK (the
+   core for `aarch64-apple-darwin`, the app) builds here into a temporary folder that is deleted after each run, and in
+   CI on a macOS runner.
+10. **Identity.** Bundle id `com.morndo.Morndo` (the owner, 27 November: "for bundle id use morndo.com"); macOS 26.0 or
+    later; hardened runtime; no App Sandbox (the app runs terminals and talks to local sockets); ad-hoc signing until a
+    Developer ID certificate exists.
+11. **How Swift gets the contract types.** The cockpit contract has generic wrappers (`Present<T>`, `Known<T>`) and
+    macro-made ids that UniFFI cannot carry as records, so the core passes the hub's JSON across the bridge, and Swift
+    decodes it with types generated from the Rust-exported schema by our own generator beside the TypeScript one. It
+    keeps the contract's rule that an unknown enum value decodes to `unknown`, which off-the-shelf generators lack. The
+    bridge stays small: bytes in, bytes out, and listener callbacks for the feed and sessions.
+
 ## Consequences
 
 - Every cockpit view exists twice, in Svelte for the web and in SwiftUI for the Mac. The mockups stay the one visual
@@ -61,6 +76,6 @@ a second time. The owner chose SwiftUI.
 
 ## Open
 
-- Where the core is built: a GitHub macOS runner producing the XCFramework, or this Mac with release builds only.
-- The minimum macOS version, and moving the build Mac from Xcode 26.2 to the current Xcode.
+- Moving the build Mac from Xcode 26.2 to the current Xcode.
 - Where the Sparkle feed is hosted and how it is signed (with the existing release channel or its own).
+- Running UI tests unattended on this Mac (macOS asks a person to authenticate before UI automation may start).
