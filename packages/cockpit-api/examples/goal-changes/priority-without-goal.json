@@ -1,0 +1,14 @@
+{
+  "topicId": "fieldwork",
+  "field": "priority",
+  "from": 3,
+  "to": 2,
+  "deadlineAt": null,
+  "previousDeadlineAt": null,
+  "unit": null,
+  "previousUnit": null,
+  "affectedTopics": ["workshop"],
+  "budget": null,
+  "priority": { "from": 3, "to": 2 },
+  "guardrail": null
+}

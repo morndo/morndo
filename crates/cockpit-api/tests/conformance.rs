@@ -1,6 +1,10 @@
 use std::{fs, path::PathBuf};
 
-use cockpit_api::{Command, Event, FeedEvent, ModuleId, WorkspaceView};
+use cockpit_api::{
+    BriefDecision, Command, DecisionView, Event, FeedEvent, GoalChange, ModuleId, QueueItem,
+    WorkspaceView,
+};
+use serde::{Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
 
 #[test]
@@ -28,6 +32,52 @@ fn shared_examples() {
 }
 
 #[test]
+fn decision_views_require_reader_permission() {
+    let brief: Value = serde_json::from_str(include_str!(
+        "../../../packages/cockpit-api/fixtures/gtm/brief.json"
+    ))
+    .unwrap();
+    let queue: Value = serde_json::from_str(include_str!(
+        "../../../packages/cockpit-api/fixtures/gtm/decisions.json"
+    ))
+    .unwrap();
+    let decision = serde_json::from_str(include_str!(
+        "../../../packages/cockpit-api/fixtures/gtm/decisions/d1.json"
+    ))
+    .unwrap();
+    fn check<T: DeserializeOwned + Serialize>(mut value: Value) {
+        for expected in [true, false] {
+            value["canDecide"] = json!(expected);
+            let parsed = serde_json::from_value::<T>(value.clone()).unwrap();
+            assert_eq!(serde_json::to_value(parsed).unwrap()["canDecide"], expected);
+        }
+        value["canDecide"] = Value::Null;
+        assert!(serde_json::from_value::<T>(value.clone()).is_err());
+        value.as_object_mut().unwrap().remove("canDecide");
+        assert!(serde_json::from_value::<T>(value).is_err());
+    }
+    check::<BriefDecision>(brief["decisions"][0].clone());
+    check::<QueueItem>(queue["items"][0].clone());
+    check::<DecisionView>(decision);
+}
+
+#[test]
+fn budget_and_priority_changes_round_trip_without_goal_values() {
+    for source in [
+        include_str!(
+            "../../../packages/cockpit-api/examples/goal-changes/budget-without-goal.json"
+        ),
+        include_str!(
+            "../../../packages/cockpit-api/examples/goal-changes/priority-without-goal.json"
+        ),
+    ] {
+        let value: Value = serde_json::from_str(source).unwrap();
+        let change: GoalChange = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(serde_json::to_value(change).unwrap(), value);
+    }
+}
+
+#[test]
 fn installed_readers_tolerate_new_fields_and_tags() {
     let mut workspace: Value = serde_json::from_str(include_str!(
         "../../../packages/cockpit-api/fixtures/gtm/workspace.json"
@@ -38,6 +88,7 @@ fn installed_readers_tolerate_new_fields_and_tags() {
     workspace["me"]["newBadge"] = json!(true);
     let read: WorkspaceView = serde_json::from_value(workspace).unwrap();
     assert_eq!(read.module.id, ModuleId::Unknown);
+    assert_eq!(read.contract_version, cockpit_api::CONTRACT_VERSION);
     let feed: FeedEvent = serde_json::from_value(json!({
         "seq": 4, "at": "2026-11-16T08:45:00+01:00", "type": "future.updated",
         "futureField": "new data"

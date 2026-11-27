@@ -2,6 +2,7 @@
   "id": "d3",
   "title": "Choose the new sign-in: passkeys or a link by email",
   "state": "open",
+  "canDecide": true,
   "topicId": "web",
   "topicName": "Web app",
   "whyYours": null,

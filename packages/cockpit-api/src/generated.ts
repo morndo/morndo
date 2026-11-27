@@ -2539,6 +2539,12 @@ export interface Target2 {
  */
 export interface BriefDecision {
   /**
+   * Whether this reader may decide. The owner always may. A reader with full topic access may
+   * decide through a decision right assigned to them for this rule, except on a goal change.
+   * When false, show the decision and name who decides, and hide Approve, Decline and Undo.
+   */
+  canDecide: boolean;
+  /**
    * Context for this record.
    */
   context: string;
@@ -4156,6 +4162,12 @@ export interface DecisionQueueView {
  */
 export interface QueueItem {
   /**
+   * Whether this reader may decide. The owner always may. A reader with full topic access may
+   * decide through a decision right assigned to them for this rule, except on a goal change.
+   * When false, show the decision and name who decides, and hide Approve, Decline and Undo.
+   */
+  canDecide: boolean;
+  /**
    * Goal change for this record.
    */
   goalChange: GoalChange | null;
@@ -4182,14 +4194,16 @@ export interface QueueItem {
   topicName: string;
 }
 /**
- * Proposed change to the numeric goal for a topic.
+ * Proposed change to a topic's goal, spend cap or priority. Budget and priority can change
+ * on a topic without a goal. Target, deadline, unit and guardrail changes require a goal.
  *
  * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "GoalChange".
  */
 export interface GoalChange {
   /**
-   * Affected topics for this record. Never the changed topic itself: the other topics that share a budget, a resource or a report with it.
+   * Other topics affected by the change, such as those that share a budget, resource or report,
+   * or whose rank changes. Excludes the changed topic.
    */
   affectedTopics: TopicId[];
   /**
@@ -4213,11 +4227,11 @@ export interface GoalChange {
    */
   guardrail: GuardrailChange | null;
   /**
-   * Original deadline when this proposal was written.
+   * Original deadline when this proposal was written, or null for a topic without a goal or deadline.
    */
   previousDeadlineAt: Timestamp | null;
   /**
-   * Original unit when this proposal was written.
+   * Original unit when this proposal was written, or null for a topic without a goal.
    */
   previousUnit: string | null;
   /**
@@ -4459,6 +4473,12 @@ export interface DecisionView {
    * Approve label for this record.
    */
   approveLabel: string;
+  /**
+   * Whether this reader may decide. The owner always may. A reader with full topic access may
+   * decide through a decision right assigned to them for this rule, except on a goal change.
+   * When false, show the decision and name who decides, and hide Approve, Decline and Undo.
+   */
+  canDecide: boolean;
   /**
    * The short paragraph on the decision card. The full page uses `context`.
    */
@@ -8470,7 +8490,8 @@ export interface TopicMeta {
    */
   parts: string[];
   /**
-   * Rank among the topics of the module (1 is first), or null when the topic has none.
+   * Rank among the module's topics with a goal or a spend cap (1 is first). Null when the topic
+   * has neither or when the reader lacks full topic access.
    */
   priority: number | null;
 }

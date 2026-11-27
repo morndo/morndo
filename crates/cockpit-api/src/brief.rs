@@ -64,6 +64,10 @@ pub struct BriefTopic {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct BriefDecision {
+    /// Whether this reader may decide. The owner always may. A reader with full topic access may
+    /// decide through a decision right assigned to them for this rule, except on a goal change.
+    /// When false, show the decision and name who decides, and hide Approve, Decline and Undo.
+    pub can_decide: bool,
     /// The manager or agent that proposed this, or null when the reader did.
     pub proposer: Present<crate::actor::Actor>,
     /// Decision right that governs this request.

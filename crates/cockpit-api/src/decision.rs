@@ -115,6 +115,10 @@ pub struct Provenance {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct QueueItem {
+    /// Whether this reader may decide. The owner always may. A reader with full topic access may
+    /// decide through a decision right assigned to them for this rule, except on a goal change.
+    /// When false, show the decision and name who decides, and hide Approve, Decline and Undo.
+    pub can_decide: bool,
     /// The manager or agent that proposed this, or null when the reader did.
     pub proposer: Present<crate::actor::Actor>,
     /// Goal change for this record.
@@ -147,6 +151,10 @@ pub struct DecisionQueueView {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct DecisionView {
+    /// Whether this reader may decide. The owner always may. A reader with full topic access may
+    /// decide through a decision right assigned to them for this rule, except on a goal change.
+    /// When false, show the decision and name who decides, and hide Approve, Decline and Undo.
+    pub can_decide: bool,
     /// The manager or agent that proposed this, or null when the reader did.
     pub proposer: Present<crate::actor::Actor>,
     /// Decision right that governs approval, decline and Undo.
@@ -253,17 +261,18 @@ pub struct DecisionPosition {
     pub open: i64,
 }
 
-/// Proposed change to the numeric goal for a topic.
+/// Proposed change to a topic's goal, spend cap or priority. Budget and priority can change
+/// on a topic without a goal. Target, deadline, unit and guardrail changes require a goal.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct GoalChange {
     /// Desired deadline, when it changes.
     pub deadline_at: Present<Timestamp>,
-    /// Original deadline when this proposal was written.
+    /// Original deadline when this proposal was written, or null for a topic without a goal or deadline.
     pub previous_deadline_at: Present<Timestamp>,
     /// Desired unit, when it changes.
     pub unit: Present<String>,
-    /// Original unit when this proposal was written.
+    /// Original unit when this proposal was written, or null for a topic without a goal.
     pub previous_unit: Present<String>,
     /// Identifier of the associated topic.
     pub topic_id: TopicId,
@@ -273,7 +282,8 @@ pub struct GoalChange {
     pub from: i64,
     /// Value the proposal asks for, as `from`.
     pub to: i64,
-    /// Affected topics for this record. Never the changed topic itself: the other topics that share a budget, a resource or a report with it.
+    /// Other topics affected by the change, such as those that share a budget, resource or report,
+    /// or whose rank changes. Excludes the changed topic.
     pub affected_topics: Vec<TopicId>,
     /// Typed payload of a budget change, or null for any other field.
     pub budget: Present<BudgetChange>,

@@ -2,6 +2,7 @@
   "id": "d1",
   "title": "Release the fix for exports that time out",
   "state": "open",
+  "canDecide": true,
   "topicId": "api",
   "topicName": "API",
   "whyYours": null,

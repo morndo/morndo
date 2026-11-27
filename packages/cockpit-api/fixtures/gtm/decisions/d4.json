@@ -2,6 +2,7 @@
   "id": "d4",
   "title": "Send the referral offer to Halden Freight Network",
   "state": "open",
+  "canDecide": true,
   "topicId": "partnerships",
   "topicName": "Partnerships",
   "whyYours": "Yours: binding terms",

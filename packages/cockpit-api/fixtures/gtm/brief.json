@@ -87,6 +87,7 @@
   "decisions": [
     {
       "id": "d1",
+      "canDecide": true,
       "topicId": "paid",
       "topicName": "Paid",
       "whyYours": "Yours: over €500",
@@ -102,6 +103,7 @@
     },
     {
       "id": "d2",
+      "canDecide": true,
       "topicId": "outbound",
       "topicName": "Outbound",
       "whyYours": "Yours: in your name",
@@ -117,6 +119,7 @@
     },
     {
       "id": "d3",
+      "canDecide": true,
       "topicId": "content",
       "topicName": "Content",
       "whyYours": "Yours: a public claim",
@@ -132,6 +135,7 @@
     },
     {
       "id": "d4",
+      "canDecide": true,
       "topicId": "partnerships",
       "topicName": "Partnerships",
       "whyYours": "Yours: binding terms",

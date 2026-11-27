@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use crate::Present;
 
 /// Current version of the cockpit wire contract.
-pub const CONTRACT_VERSION: &str = "1.1.0";
+pub const CONTRACT_VERSION: &str = "1.2.0";
 /// Schema identifier for this major version.
 pub const CONTRACT_ID: &str = "urn:morndo:cockpit-api:1";
 

@@ -2,6 +2,7 @@
   "id": "d3",
   "title": "Publish the Fenwick Freight customer story",
   "state": "open",
+  "canDecide": true,
   "topicId": "content",
   "topicName": "Content",
   "whyYours": "Yours: a public claim",
