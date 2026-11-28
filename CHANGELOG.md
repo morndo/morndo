@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.5.0](https://github.com/morndo/morndo/compare/v0.4.0...v0.5.0) (2026-11-28)
+
+
+### Features
+
+* **cockpit:** API contract 1.1.0 for the UI promises 1.0.0 left open ([#253](https://github.com/morndo/morndo/issues/253)) ([48bd1d0](https://github.com/morndo/morndo/commit/48bd1d02010ad191bfeb51b8e64bf3a506bbbdd8))
+* **cockpit:** API contract 1.2.0: who may decide, budget and priority without a goal ([#254](https://github.com/morndo/morndo/issues/254)) ([055b84b](https://github.com/morndo/morndo/commit/055b84b9ae5aed7c627a7a66bfe76a19a123be78))
+* **cockpit:** design, ADR-0044 and API contract 1.0.0 with a stand-in hub ([#251](https://github.com/morndo/morndo/issues/251)) ([017d760](https://github.com/morndo/morndo/commit/017d7608470baa733db21ef3dc64cfdacf10b741))
+
 ## [0.4.0](https://github.com/morndo/morndo/compare/v0.3.0...v0.4.0) (2026-11-11)
 
 
